@@ -1,9 +1,9 @@
 """Archive Bilibili extraction outputs for long-term knowledge-base use.
 
-Input is an extraction directory created by extract_bilibili.py and optionally
-fetch_browser_ai_subtitles.py/download_browser_subtitles.py. The script copies
-raw subtitles/comments into a stable archive and builds retrieval-friendly
-Markdown and JSONL indexes.
+Input is an extraction directory created by extract_bilibili.py,
+extract_bilibili_opus.py, and optionally fetch_browser_ai_subtitles.py. The
+script copies raw subtitles/articles/comments into a stable archive and builds
+retrieval-friendly Markdown and JSONL indexes.
 """
 
 from __future__ import annotations
@@ -13,9 +13,20 @@ import json
 import math
 import re
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+def configure_stdout() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
+
+configure_stdout()
 
 
 def read_json(path: Path) -> Any:
@@ -447,9 +458,90 @@ def archive_comments(extract_dir: Path, archive_dir: Path) -> dict[str, Any]:
     return {"available": True, **summary}
 
 
+def archive_articles(extract_dir: Path, archive_dir: Path) -> dict[str, Any]:
+    md_path = extract_dir / "article_content.md"
+    txt_path = extract_dir / "article_content.txt"
+    jsonl_path = extract_dir / "article_content.jsonl"
+    evidence_path = extract_dir / "article_evidence.jsonl"
+    images_manifest_path = extract_dir / "images_manifest.json"
+    normalized_path = extract_dir / "opus_normalized.json"
+    if not any(path.exists() for path in (md_path, txt_path, jsonl_path, evidence_path)):
+        return {"available": False, "reason": "article content files not found"}
+
+    articles_dir = archive_dir / "articles"
+    images_dir = archive_dir / "images"
+    index_dir = archive_dir / "indexes"
+    metadata_dir = archive_dir / "metadata"
+
+    copy_if_exists(md_path, articles_dir / "图文全文.md")
+    copy_if_exists(txt_path, articles_dir / "图文全文.txt")
+    copy_if_exists(jsonl_path, index_dir / "图文全集.jsonl")
+    copy_if_exists(evidence_path, index_dir / "图文证据索引.jsonl")
+    copy_if_exists(md_path, index_dir / "图文全集.md")
+    copy_if_exists(images_manifest_path, images_dir / "images_manifest.json")
+    copy_if_exists(normalized_path, metadata_dir / "opus_normalized.json")
+    copy_if_exists(extract_dir / "opus_raw.json", metadata_dir / "opus_raw.json")
+
+    image_src_dir = extract_dir / "images"
+    copied_images = 0
+    if image_src_dir.exists():
+        images_dir.mkdir(parents=True, exist_ok=True)
+        for image_path in image_src_dir.iterdir():
+            if image_path.is_file():
+                shutil.copy2(image_path, images_dir / image_path.name)
+                copied_images += 1
+
+    article_chars = 0
+    if txt_path.exists():
+        article_chars = len(txt_path.read_text(encoding="utf-8").strip())
+    blocks = 0
+    if jsonl_path.exists():
+        blocks = len([line for line in jsonl_path.read_text(encoding="utf-8").splitlines() if line.strip()])
+    evidence_blocks = 0
+    evidence_md = ["# 图文证据索引", ""]
+    if evidence_path.exists():
+        records = []
+        for line in evidence_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            evidence_blocks += 1
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            records.append(record)
+            evidence_md.extend([f"## {record.get('evidence_id')}", "", str(record.get("text") or ""), ""])
+        (index_dir / "图文证据索引.md").write_text("\n".join(evidence_md), encoding="utf-8")
+
+    image_count = 0
+    if images_manifest_path.exists():
+        manifest = read_json(images_manifest_path)
+        image_count = len(manifest.get("images") or []) if isinstance(manifest, dict) else 0
+
+    normalized = read_json(normalized_path) if normalized_path.exists() else {}
+    summary = {
+        "source": normalized.get("source"),
+        "opus_id": normalized.get("id_str"),
+        "title": normalized.get("title"),
+        "author": (normalized.get("author") or {}).get("name"),
+        "published": (normalized.get("author") or {}).get("pub_time"),
+        "article_chars": article_chars,
+        "blocks": blocks,
+        "evidence_blocks": evidence_blocks,
+        "image_count": image_count,
+        "copied_images": copied_images,
+    }
+    write_json(metadata_dir / "article_manifest.clean.json", summary)
+    return {"available": True, **summary}
+
+
 def combine_evidence_indexes(archive_dir: Path) -> int:
     index_dir = archive_dir / "indexes"
-    sources = [index_dir / "字幕证据索引.jsonl", index_dir / "评论证据索引.jsonl"]
+    sources = [
+        index_dir / "字幕证据索引.jsonl",
+        index_dir / "图文证据索引.jsonl",
+        index_dir / "评论证据索引.jsonl",
+    ]
     lines: list[str] = []
     for source in sources:
         if source.exists():
@@ -557,21 +649,41 @@ def extract_quality_metrics(archive_dir: Path, now: datetime | None = None) -> d
     }
 
 
-def write_note_budget(archive_dir: Path, subtitle_info: dict[str, Any], comment_info: dict[str, Any], evidence_count: int) -> dict[str, Any]:
+def write_note_budget(
+    archive_dir: Path,
+    subtitle_info: dict[str, Any],
+    comment_info: dict[str, Any],
+    evidence_count: int,
+    article_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    article_info = article_info or {}
+    has_article = bool(article_info.get("available"))
     duration_minutes = float(subtitle_info.get("duration_minutes") or 0)
     subtitle_chars = int(subtitle_info.get("subtitle_chars") or 0)
-    evidence_blocks = int(subtitle_info.get("evidence_blocks") or 0)
+    article_chars = int(article_info.get("article_chars") or 0)
+    content_chars = article_chars if has_article else subtitle_chars
+    evidence_blocks = int((article_info if has_article else subtitle_info).get("evidence_blocks") or 0)
     comment_records = int(comment_info.get("jsonl_records") or comment_info.get("total_fetched_comments") or 0)
     parts = int(subtitle_info.get("parts") or 0)
+    article_blocks = int(article_info.get("blocks") or 0)
     quality_metrics = extract_quality_metrics(archive_dir)
     quality_multiplier = float(quality_metrics.get("quality_multiplier") or 1.0)
 
-    # Scale with information volume while keeping very long courses manageable.
-    base_target_min = clamp(
-        600 + duration_minutes * 35 + subtitle_chars * 0.025 + evidence_blocks * 8 + min(comment_records, 300) * 3,
-        1200,
-        45000,
-    )
+    if has_article:
+        reading_minutes = max(1.0, content_chars / 450)
+        base_target_min = clamp(
+            700 + reading_minutes * 25 + content_chars * 0.06 + evidence_blocks * 6 + min(comment_records, 300) * 3,
+            1200,
+            45000,
+        )
+    else:
+        reading_minutes = duration_minutes
+        # Scale with information volume while keeping very long courses manageable.
+        base_target_min = clamp(
+            600 + duration_minutes * 35 + subtitle_chars * 0.025 + evidence_blocks * 8 + min(comment_records, 300) * 3,
+            1200,
+            45000,
+        )
     base_target_max = clamp(base_target_min * 1.45, 1800, 65000)
     target_min = clamp(base_target_min * quality_multiplier, 1200, 65000)
     target_max = clamp(target_min * 1.45, 1800, 65000)
@@ -580,10 +692,19 @@ def write_note_budget(archive_dir: Path, subtitle_info: dict[str, Any], comment_
 
     subtitle_chars_per_minute = subtitle_info.get("subtitle_chars_per_minute")
     evidence_blocks_per_minute = round(evidence_blocks / duration_minutes, 3) if duration_minutes else None
-    compression_ratio_min = round(target_min / subtitle_chars, 4) if subtitle_chars else None
-    compression_ratio_max = round(target_max / subtitle_chars, 4) if subtitle_chars else None
+    compression_ratio_min = round(target_min / content_chars, 4) if content_chars else None
+    compression_ratio_max = round(target_max / content_chars, 4) if content_chars else None
 
-    if duration_minutes >= 120 or parts >= 10:
+    if has_article and content_chars >= 12000:
+        granularity = "long_article"
+        writing_guidance = "按文章章节写学习型笔记，保留概念、方案对比、代码块、图片结论和选择建议。"
+    elif has_article and content_chars >= 4000:
+        granularity = "medium_article"
+        writing_guidance = "保留文章结构、核心概念、关键图示和实践建议。"
+    elif has_article:
+        granularity = "short_article"
+        writing_guidance = "提炼核心观点和关键图片信息，避免过度扩写。"
+    elif duration_minutes >= 120 or parts >= 10:
         granularity = "long_course"
         writing_guidance = "按模块/分P写，保留逐P表；不要压成短视频式摘要。"
     elif duration_minutes >= 25:
@@ -594,8 +715,13 @@ def write_note_budget(archive_dir: Path, subtitle_info: dict[str, Any], comment_
         writing_guidance = "以核心观点、证据和少量实践建议为主，避免过度扩写。"
 
     budget = {
+        "content_type": "opus" if has_article else "video",
         "duration_minutes": round(duration_minutes, 3),
+        "reading_minutes_estimate": round(reading_minutes, 3) if has_article else None,
         "parts": parts,
+        "article_blocks": article_blocks if has_article else None,
+        "article_chars": article_chars if has_article else None,
+        "content_chars": content_chars,
         "subtitle_lines": subtitle_info.get("subtitle_lines"),
         "subtitle_chars": subtitle_chars,
         "subtitle_chars_per_minute": subtitle_chars_per_minute,
@@ -622,7 +748,7 @@ def write_note_budget(archive_dir: Path, subtitle_info: dict[str, Any], comment_
 
 def archive_metadata(extract_dir: Path, archive_dir: Path) -> dict[str, bool]:
     copied: dict[str, bool] = {}
-    for name in ("metadata.json", "source.md", "run_summary.json", "subtitle_probe.json"):
+    for name in ("metadata.json", "source.md", "run_summary.json", "subtitle_probe.json", "opus_raw.json", "opus_normalized.json"):
         copied[name] = copy_if_exists(extract_dir / name, archive_dir / "metadata" / name)
     return copied
 
@@ -671,6 +797,18 @@ def summarize_comments_for_readme(comment_info: dict[str, Any]) -> str:
     )
 
 
+def summarize_articles_for_readme(article_info: dict[str, Any]) -> str:
+    if not article_info.get("available"):
+        return f"未归档图文（{article_info.get('reason', '没有图文内容')}）。"
+    return (
+        f"已归档图文正文 {fmt_readme_number(article_info.get('article_chars'))} 字，"
+        f"{fmt_readme_number(article_info.get('blocks'))} 个内容块，"
+        f"{fmt_readme_number(article_info.get('evidence_blocks'))} 个图文证据块，"
+        f"{fmt_readme_number(article_info.get('image_count'))} 张图片"
+        f"（本地图片 {fmt_readme_number(article_info.get('copied_images'))} 张）。"
+    )
+
+
 def summarize_metadata_for_readme(metadata_info: dict[str, bool]) -> str:
     copied = [name for name, ok in metadata_info.items() if ok]
     missing = [name for name, ok in metadata_info.items() if not ok]
@@ -709,32 +847,41 @@ def summarize_budget_for_readme(note_budget: dict[str, Any]) -> str:
 def write_readme(
     archive_dir: Path,
     subtitle_info: dict[str, Any],
+    article_info: dict[str, Any],
     comment_info: dict[str, Any],
     metadata_info: dict[str, bool],
     note_budget: dict[str, Any],
 ) -> None:
+    is_opus = bool(article_info.get("available"))
     lines = [
-        "# B站视频材料包",
+        "# B站材料包",
         "",
-        "这是一个视频的长期材料包。知识库笔记适合快速阅读；这里保存完整字幕、评论、元数据和证据索引，方便以后追问、核对原文或重新生成笔记。",
+        "这是一个 B站内容的长期材料包。知识库笔记适合快速阅读；这里保存完整正文/字幕、图片、评论、元数据和证据索引，方便以后追问、核对原文或重新生成笔记。",
         "",
         "## 先看哪里",
         "",
-        "- 想通读原文：打开 `indexes/字幕全集.md`。",
-        "- 想核对某个观点：查 `indexes/证据索引.jsonl`，里面包含字幕证据和评论证据。",
+        "- 想通读原文：图文打开 `indexes/图文全集.md`，视频打开 `indexes/字幕全集.md`。",
+        "- 想核对某个观点：查 `indexes/证据索引.jsonl`，里面包含图文/字幕证据和评论证据。",
         "- 想看评论区：打开 `comments/评论全集.md`。",
         "- 想判断笔记是否写得过短或过长：看 `metadata/note_budget.json` 和 `metadata/note_score.json`。",
         "- 想让工具检索或问答：优先使用 `indexes/*.jsonl`。",
         "",
         "## 本次覆盖",
         "",
-        f"- 字幕：{summarize_subtitles_for_readme(subtitle_info)}",
+        f"- 图文：{summarize_articles_for_readme(article_info)}" if is_opus else f"- 字幕：{summarize_subtitles_for_readme(subtitle_info)}",
         f"- 评论：{summarize_comments_for_readme(comment_info)}",
         f"- 元数据：{summarize_metadata_for_readme(metadata_info)}",
         f"- 笔记预算：{summarize_budget_for_readme(note_budget)}",
         "",
         "## 文件说明",
         "",
+        "- `articles/图文全文.md`：图文正文的 Markdown 版本。",
+        "- `articles/图文全文.txt`：图文正文纯文本。",
+        "- `images/`：图文图片和图片清单。",
+        "- `indexes/图文全集.md`：合并后的完整图文正文。",
+        "- `indexes/图文全集.jsonl`：逐图文内容块索引，适合检索和问答。",
+        "- `indexes/图文证据索引.md`：按文章结构合并的图文证据块，适合人工核对。",
+        "- `indexes/图文证据索引.jsonl`：图文证据块的机器可读版本。",
         "- `subtitles/txt/`：每个分P的纯文本字幕。",
         "- `subtitles/srt/`：每个分P的 SRT 字幕，带时间轴，适合回看定位。",
         "- `subtitles/json/`：B站字幕原始 JSON，适合程序复用。",
@@ -746,17 +893,17 @@ def write_readme(
         "- `indexes/字幕证据索引.jsonl`：字幕证据块的机器可读版本。",
         "- `indexes/评论全集.jsonl`：逐评论/回复索引。",
         "- `indexes/评论证据索引.jsonl`：评论证据块。",
-        "- `indexes/证据索引.jsonl`：字幕证据和评论证据的合并索引。",
-        "- `metadata/metadata.json`：B站视频元数据，包括标题、UP、发布时间和互动数据。",
-        "- `metadata/note_budget.json`：根据视频时长、字幕量、证据量和互动质量生成的推荐笔记长度。",
+        "- `indexes/证据索引.jsonl`：图文/字幕证据和评论证据的合并索引。",
+        "- `metadata/metadata.json`：B站内容元数据，包括标题、UP、发布时间和互动数据。",
+        "- `metadata/note_budget.json`：根据正文/字幕量、证据量和互动质量生成的推荐笔记长度。",
         "- `metadata/note_score.json`：最终笔记与推荐长度的对比结果；如果还没有生成，可忽略。",
         "",
         "## 推荐用法",
         "",
         "1. 先读知识库里的最终笔记，快速了解结论。",
-        "2. 对某个判断不放心时，用笔记里的 `Pxx@时间段` 或 `C评论ID` 回到 `indexes/证据索引.jsonl` 查原文。",
-        "3. 需要更细的追问时，把 `indexes/字幕全集.jsonl` 和 `indexes/评论全集.jsonl` 当作问答材料。",
-        "4. 重新写笔记前先看 `metadata/note_budget.json`：长视频、高互动视频应该保留更多结构和证据，短视频则避免过度扩写。",
+        "2. 对某个判断不放心时，用笔记里的 `O图文证据ID`、`Pxx@时间段` 或 `C评论ID` 回到 `indexes/证据索引.jsonl` 查原文。",
+        "3. 需要更细的追问时，把 `indexes/图文全集.jsonl`、`indexes/字幕全集.jsonl` 和 `indexes/评论全集.jsonl` 当作问答材料。",
+        "4. 重新写笔记前先看 `metadata/note_budget.json`：长视频、长图文、高互动内容应该保留更多结构和证据，短内容则避免过度扩写。",
         "",
     ]
     (archive_dir / "README.md").write_text("\n".join(lines), encoding="utf-8")
@@ -774,16 +921,18 @@ def main() -> int:
 
     metadata_info = archive_metadata(extract_dir, archive_dir)
     subtitle_info = archive_subtitles(extract_dir, archive_dir)
+    article_info = archive_articles(extract_dir, archive_dir)
     comment_info = archive_comments(extract_dir, archive_dir)
     evidence_count = combine_evidence_indexes(archive_dir)
-    note_budget = write_note_budget(archive_dir, subtitle_info, comment_info, evidence_count)
-    write_readme(archive_dir, subtitle_info, comment_info, metadata_info, note_budget)
+    note_budget = write_note_budget(archive_dir, subtitle_info, comment_info, evidence_count, article_info)
+    write_readme(archive_dir, subtitle_info, article_info, comment_info, metadata_info, note_budget)
 
     print(
         json.dumps(
             {
                 "archive_dir": str(archive_dir),
                 "subtitles": subtitle_info,
+                "article": article_info,
                 "comments": comment_info,
                 "evidence_blocks": evidence_count,
                 "note_budget": note_budget,

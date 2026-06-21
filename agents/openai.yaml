@@ -1,4 +1,4 @@
 interface:
   display_name: "Bili Note"
-  short_description: "把 B站视频转成学习型知识笔记。"
-  default_prompt: "Use $bili-note to extract a Bilibili video, archive full subtitles/comments, build evidence indexes, and save a learning-oriented Markdown note with concepts, workflows, pitfalls, practice checklists, and self-test questions."
+  short_description: "把 B站视频和图文转成学习型知识笔记。"
+  default_prompt: "Use $bili-note to extract a Bilibili video or opus/article post, archive full subtitles or article content, images, useful comments, and evidence indexes, then save a learning-oriented Markdown note with concepts, workflows, pitfalls, practice checklists, and self-test questions."

@@ -88,7 +88,8 @@ def test_archive_builds_subtitle_and_comment_evidence_indexes(tmp_path):
     comment_info = module.archive_comments(extract_dir, archive_dir)
     combined = module.combine_evidence_indexes(archive_dir)
     note_budget = module.write_note_budget(archive_dir, subtitle_info, comment_info, combined)
-    module.write_readme(archive_dir, subtitle_info, comment_info, metadata_info, note_budget)
+    article_info = {"available": False, "reason": "not an opus"}
+    module.write_readme(archive_dir, subtitle_info, article_info, comment_info, metadata_info, note_budget)
 
     assert metadata_info
     assert subtitle_info["subtitle_lines"] == 2
@@ -109,6 +110,65 @@ def test_archive_builds_subtitle_and_comment_evidence_indexes(tmp_path):
     assert "P01@00:00:00-00:00:02" in evidence
     assert "C1" in evidence
     assert "C2" in evidence
+
+
+def test_archive_articles_builds_indexes_and_article_budget(tmp_path):
+    module = load_module()
+    extract_dir = tmp_path / "extract"
+    archive_dir = tmp_path / "archive"
+    extract_dir.mkdir()
+
+    (extract_dir / "article_content.md").write_text("# 图文标题\n\n正文内容\n", encoding="utf-8")
+    (extract_dir / "article_content.txt").write_text("正文内容\n", encoding="utf-8")
+    (extract_dir / "article_content.jsonl").write_text(
+        json.dumps({"block_id": "O123-B001", "text": "正文内容"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    (extract_dir / "article_evidence.jsonl").write_text(
+        json.dumps({"evidence_id": "O123-E001", "text": "正文内容"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    write_json(extract_dir / "images_manifest.json", {"opus_id": "123", "images": [{"index": 1, "url": "https://i0.hdslb.com/a.jpg"}]})
+    write_json(
+        extract_dir / "opus_normalized.json",
+        {
+            "source": "https://www.bilibili.com/opus/123",
+            "id_str": "123",
+            "title": "图文标题",
+            "author": {"name": "UP", "pub_time": "2026-01-01 00:00:00"},
+        },
+    )
+    write_json(
+        extract_dir / "metadata.json",
+        {
+            "data": {
+                "pubdate": 1767225600,
+                "stat": {"view": 0, "reply": 2, "favorite": 3, "coin": 0, "share": 1, "like": 8, "danmaku": 0},
+            }
+        },
+    )
+
+    metadata_info = module.archive_metadata(extract_dir, archive_dir)
+    subtitle_info = module.archive_subtitles(extract_dir, archive_dir)
+    article_info = module.archive_articles(extract_dir, archive_dir)
+    comment_info = module.archive_comments(extract_dir, archive_dir)
+    combined = module.combine_evidence_indexes(archive_dir)
+    note_budget = module.write_note_budget(archive_dir, subtitle_info, comment_info, combined, article_info)
+    module.write_readme(archive_dir, subtitle_info, article_info, comment_info, metadata_info, note_budget)
+
+    assert article_info["available"] is True
+    assert article_info["article_chars"] == 4
+    assert article_info["blocks"] == 1
+    assert article_info["evidence_blocks"] == 1
+    assert article_info["image_count"] == 1
+    assert combined == 1
+    assert note_budget["content_type"] == "opus"
+    assert note_budget["content_chars"] == 4
+    assert (archive_dir / "articles" / "图文全文.md").exists()
+    assert (archive_dir / "indexes" / "图文证据索引.md").exists()
+    readme = (archive_dir / "README.md").read_text(encoding="utf-8")
+    assert "图文：" in readme
+    assert "O图文证据ID" in readme
 
 
 def test_archive_subtitles_falls_back_to_existing_clean_manifest(tmp_path):

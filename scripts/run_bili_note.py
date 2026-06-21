@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -19,8 +20,19 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 EXTRACT_SCRIPT = SCRIPT_DIR / "extract_bilibili.py"
+EXTRACT_OPUS_SCRIPT = SCRIPT_DIR / "extract_bilibili_opus.py"
 BROWSER_AI_SCRIPT = SCRIPT_DIR / "fetch_browser_ai_subtitles.py"
 ARCHIVE_SCRIPT = SCRIPT_DIR / "archive_bili_materials.py"
+
+
+def configure_stdout() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
+
+configure_stdout()
 
 
 def safe_slug(value: str, default: str = "video") -> str:
@@ -31,6 +43,21 @@ def safe_slug(value: str, default: str = "video") -> str:
 def find_bvid(source: str) -> str:
     match = re.search(r"BV[0-9A-Za-z]+", source)
     return match.group(0) if match else safe_slug(source, "bili")
+
+
+def source_kind(source: str) -> str:
+    if re.search(r"(?:opus|dynamic)/\d+", source) or re.fullmatch(r"\d{12,}", source.strip()):
+        return "opus"
+    return "video"
+
+
+def find_source_id(source: str) -> str:
+    if source_kind(source) == "opus":
+        match = re.search(r"(?:opus|dynamic)/(\d+)", source)
+        if not match:
+            match = re.search(r"\b(\d{12,})\b", source)
+        return match.group(1) if match else safe_slug(source, "opus")
+    return find_bvid(source)
 
 
 def read_json(path: Path) -> Any:
@@ -45,7 +72,9 @@ def write_json(path: Path, data: Any) -> None:
 def run_cmd(cmd: list[str], *, dry_run: bool = False) -> dict[str, Any]:
     if dry_run:
         return {"cmd": cmd, "returncode": 0, "skipped": True, "reason": "dry_run"}
-    result = subprocess.run(cmd, text=True, capture_output=True)
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    result = subprocess.run(cmd, text=True, capture_output=True, encoding="utf-8", errors="replace", env=env)
     return {
         "cmd": cmd,
         "returncode": result.returncode,
@@ -92,6 +121,10 @@ def archive_available(archive_dir: Path | None) -> bool:
     return (archive_dir / "indexes" / "证据索引.jsonl").exists()
 
 
+def article_available(work_dir: Path) -> bool:
+    return (work_dir / "article_content.md").exists() and (work_dir / "article_evidence.jsonl").exists()
+
+
 def summarize_outputs(work_dir: Path, archive_dir: Path | None) -> dict[str, Any]:
     public_subtitles = public_subtitle_count(work_dir)
     browser_count, browser_downloaded = browser_subtitle_status(work_dir)
@@ -101,11 +134,15 @@ def summarize_outputs(work_dir: Path, archive_dir: Path | None) -> dict[str, Any
         "public_subtitle_tracks": public_subtitles,
         "browser_ai_subtitle_parts": browser_count,
         "browser_ai_subtitle_downloaded": browser_downloaded,
+        "article_content": article_available(work_dir),
+        "images_manifest": (work_dir / "images_manifest.json").exists(),
         "comments": comments_available(work_dir),
     }
     if archive_dir:
         summary["archive_dir"] = str(archive_dir)
         for rel in (
+            "indexes/图文全集.jsonl",
+            "indexes/图文证据索引.jsonl",
             "indexes/字幕全集.jsonl",
             "indexes/字幕证据索引.jsonl",
             "indexes/评论全集.jsonl",
@@ -168,11 +205,17 @@ def append_step(steps: list[dict[str, Any]], name: str, result: dict[str, Any]) 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Bili Note extraction, archive, and evidence indexing")
-    parser.add_argument("source", help="Bilibili URL or BVID")
+    parser.add_argument("source", help="Bilibili video/opus URL, BVID, or opus id")
     parser.add_argument("--work-dir", help="Temporary extraction directory")
     parser.add_argument("--archive-dir", help="Permanent archive directory")
     parser.add_argument("--parts", default="all", help="'all', 'key', or comma-separated page numbers")
     parser.add_argument("--comments", action="store_true", help="Fetch comments")
+    parser.add_argument(
+        "--download-images",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Download opus/article images when source is a Bilibili opus page",
+    )
     parser.add_argument("--browser-target", help="web-access CDP target id for browser AI subtitles")
     parser.add_argument("--subtitle-mode", choices=["auto", "public", "browser", "none"], default="auto")
     parser.add_argument("--archive", action=argparse.BooleanOptionalAction, default=True, help="Archive materials when archive-dir is set")
@@ -180,11 +223,59 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Print planned stages without running them")
     args = parser.parse_args()
 
-    bvid = find_bvid(args.source)
-    work_dir = Path(args.work_dir) if args.work_dir else Path.cwd() / f"tmp_bili_note_{safe_slug(bvid)}"
+    source_id = find_source_id(args.source)
+    work_dir = Path(args.work_dir) if args.work_dir else Path.cwd() / f"tmp_bili_note_{safe_slug(source_id)}"
     archive_dir = Path(args.archive_dir) if args.archive_dir else None
     work_dir.mkdir(parents=True, exist_ok=True)
     steps: list[dict[str, Any]] = []
+    kind = source_kind(args.source)
+
+    if kind == "opus":
+        need_extract = args.force or not article_available(work_dir)
+        if need_extract:
+            cmd = [sys.executable, str(EXTRACT_OPUS_SCRIPT), args.source, "--out", str(work_dir)]
+            if not args.download_images:
+                cmd.append("--no-download-images")
+            if args.comments:
+                cmd.append("--comments")
+            if args.force:
+                cmd.append("--force")
+            append_step(steps, "opus_content_images", run_cmd(cmd, dry_run=args.dry_run))
+        else:
+            append_step(
+                steps,
+                "opus_content_images",
+                {"skipped": True, "reason": "article content already available", "returncode": 0},
+            )
+        if args.archive and archive_dir:
+            if args.force or not archive_available(archive_dir):
+                cmd = [
+                    sys.executable,
+                    str(ARCHIVE_SCRIPT),
+                    "--extract-dir",
+                    str(work_dir),
+                    "--archive-dir",
+                    str(archive_dir),
+                ]
+                append_step(steps, "archive_materials", run_cmd(cmd, dry_run=args.dry_run))
+            else:
+                append_step(
+                    steps,
+                    "archive_materials",
+                    {"skipped": True, "reason": "archive evidence index already exists", "returncode": 0},
+                )
+        elif args.archive and not archive_dir:
+            append_step(
+                steps,
+                "archive_materials",
+                {"skipped": True, "reason": "no --archive-dir provided", "returncode": 0},
+            )
+
+        summary = summarize_outputs(work_dir, archive_dir)
+        summary["kind"] = "opus"
+        write_report(work_dir, archive_dir, steps, summary)
+        print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
+        return 0
 
     need_extract = args.force or not metadata_available(work_dir)
     need_public_subtitles = args.subtitle_mode in ("auto", "public") and (args.force or public_subtitle_count(work_dir) == 0)

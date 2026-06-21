@@ -29,6 +29,16 @@ MIXIN_KEY_ENC_TAB = [
 ]
 
 
+def configure_stdout() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
+
+configure_stdout()
+
+
 def headers(bvid: str | None = None) -> dict[str, str]:
     referer = "https://www.bilibili.com/"
     if bvid:
@@ -520,7 +530,7 @@ def transcribe_wavs(
     return transcribe_wavs_openai_whisper(manifest, out_dir, model_name, language, force)
 
 
-def get_mixin_key(bvid: str) -> str:
+def get_mixin_key(bvid: str | None) -> str:
     obj = request_json(BASE + "/x/web-interface/nav", bvid)
     wbi = ((obj.get("data") or {}).get("wbi_img") or {})
     img_key = Path(urllib.parse.urlparse(wbi.get("img_url", "")).path).stem
@@ -590,13 +600,23 @@ def compact_reply(reply: dict) -> dict:
     }
 
 
-def fetch_child_replies(aid: str, bvid: str, root_rpid: str, expected: int = 0) -> tuple[list[dict], int | None]:
+def fetch_child_replies(
+    oid: str,
+    bvid: str | None,
+    root_rpid: str,
+    expected: int = 0,
+    target_type: int = 1,
+) -> tuple[list[dict], int | None]:
     children = []
     seen = set()
     pn = 1
     total = None
     while True:
-        obj = api_get("/x/v2/reply/reply", {"type": 1, "oid": aid, "root": root_rpid, "pn": pn, "ps": 20}, bvid)
+        obj = api_get(
+            "/x/v2/reply/reply",
+            {"type": target_type, "oid": oid, "root": root_rpid, "pn": pn, "ps": 20},
+            bvid,
+        )
         data = obj.get("data") or {}
         total = total if total is not None else ((data.get("page") or {}).get("count"))
         replies = data.get("replies") or []
@@ -622,7 +642,14 @@ def quote_block(text: str) -> str:
     return "\n".join("> " + line for line in text.split("\n"))
 
 
-def fetch_comments(aid: str, bvid: str, out_dir: Path, mode: int = 3) -> dict:
+def fetch_comments(
+    oid: str,
+    bvid: str | None,
+    out_dir: Path,
+    mode: int = 3,
+    target_type: int = 1,
+    source: str | None = None,
+) -> dict:
     mixin_key = get_mixin_key(bvid)
     roots = []
     seen = set()
@@ -631,7 +658,7 @@ def fetch_comments(aid: str, bvid: str, out_dir: Path, mode: int = 3) -> dict:
     for _ in range(40):
         obj = api_get(
             "/x/v2/reply/wbi/main",
-            {"type": 1, "oid": aid, "mode": mode, "next": next_value, "ps": 20, "web_location": 1315875},
+            {"type": target_type, "oid": oid, "mode": mode, "next": next_value, "ps": 20, "web_location": 1315875},
             bvid,
             signed=True,
             mixin_key=mixin_key,
@@ -667,7 +694,7 @@ def fetch_comments(aid: str, bvid: str, out_dir: Path, mode: int = 3) -> dict:
         raw_children = []
         if item["rcount"] > 0:
             try:
-                raw_children, _ = fetch_child_replies(aid, bvid, item["rpid"], item["rcount"])
+                raw_children, _ = fetch_child_replies(oid, bvid, item["rpid"], item["rcount"], target_type)
             except Exception as exc:
                 item["child_fetch_error"] = str(exc)
                 raw_children = reply.get("replies") or []
@@ -680,8 +707,10 @@ def fetch_comments(aid: str, bvid: str, out_dir: Path, mode: int = 3) -> dict:
 
     fetched_at = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
     result = {
-        "source": f"https://www.bilibili.com/video/{bvid}/",
-        "aid": aid,
+        "source": source or (f"https://www.bilibili.com/video/{bvid}/" if bvid else ""),
+        "oid": oid,
+        "target_type": target_type,
+        "aid": oid if target_type == 1 else None,
         "bvid": bvid,
         "fetched_at": fetched_at,
         "wbi_main_all_count": all_count,

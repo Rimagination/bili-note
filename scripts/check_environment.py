@@ -18,6 +18,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REQUIRED_SCRIPTS = (
     "run_bili_note.py",
     "extract_bilibili.py",
+    "extract_bilibili_opus.py",
     "fetch_browser_ai_subtitles.py",
     "archive_bili_materials.py",
     "score_bili_note.py",
@@ -156,7 +157,7 @@ def evaluate_environment(
         },
         "public_subtitles_comments_archive": {
             "ok": public_route_ok,
-            "needs": ["network access to Bilibili public APIs"],
+            "needs": ["network access to Bilibili public APIs and public opus pages"],
             "bilibili_api": bilibili_api,
             "python_packages": "stdlib only",
         },
@@ -222,7 +223,7 @@ def print_human(report: dict[str, Any]) -> None:
         print(f"  Missing scripts: {', '.join(report['scripts']['missing'])}")
     else:
         print("  Bundled scripts: OK")
-    print(f"- Public subtitles/comments/archive: {mark(capabilities['public_subtitles_comments_archive']['ok'])}")
+    print(f"- Public subtitles/opus/comments/archive: {mark(capabilities['public_subtitles_comments_archive']['ok'])}")
     api = capabilities["public_subtitles_comments_archive"]["bilibili_api"]
     print(f"  Bilibili API: {'reachable' if api.get('reachable') else 'not reachable'}")
     print("  Python packages: stdlib only")

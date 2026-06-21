@@ -37,6 +37,28 @@ For child replies:
 
 Pitfall: `/x/v2/reply?type=1&oid=...` can report a full count but return only a few pinned/hot roots. Use WBI main when the user wants all comments.
 
+## Opus / Article Posts
+
+For URLs like `https://www.bilibili.com/opus/<id>` or `/dynamic/<id>`, prefer the public page HTML over the polymer dynamic API:
+
+- Parse `window.__INITIAL_STATE__` from the opus page.
+- Main content lives under `detail.modules[]`, especially `MODULE_TYPE_TITLE`, `MODULE_TYPE_AUTHOR`, `MODULE_TYPE_CONTENT`, `MODULE_TYPE_STAT`, and `MODULE_TYPE_COPYRIGHT`.
+- `MODULE_TYPE_CONTENT.module_content.paragraphs[]` observed paragraph types:
+  - `para_type=1`: text nodes.
+  - `para_type=2`: images under `pic.pics[]`.
+  - `para_type=5`: lists under `list.children[]`.
+  - `para_type=6`: link cards.
+  - `para_type=7`: code blocks under `code.lang` and `code.content`.
+  - `para_type=8`: headings.
+- `https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id=<opus_id>` may return anti-scraping errors such as `-352` even when the public page HTML contains the full article.
+
+For opus comments, do not use the opus id as `oid`. Read:
+
+- `detail.basic.comment_type` as the reply `type`.
+- `detail.basic.comment_id_str` as the reply `oid`.
+
+Example from a public opus page: `comment_type=12`, `comment_id_str=48091857`.
+
 ## Local Transcription
 
 Example command:
