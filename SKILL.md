@@ -9,6 +9,8 @@ description: Extract Bilibili videos into readable Markdown knowledge notes. Use
 
 联网或登录态操作必须先使用 `web-access`。
 
+网页 AI 字幕当前只支持 Chrome + `web-access` 路线：让已登录的 B站页面自己请求字幕接口。不要把 Edge、Playwright 临时浏览器或原生 CDP 端口当成等价替代，除非脚本已经明确支持。
+
 ## 依赖与环境检查
 
 默认路线尽量零第三方 Python 依赖：元数据、公开字幕、评论、归档、证据索引和笔记预算都用标准库完成。网页 AI 字幕和音频 ASR 是增强路线，不是启动门槛。
@@ -24,9 +26,23 @@ $py = "python"
 根据检查结果选择路线：
 
 - `public_subtitles_comments_archive=OK`：优先走默认字幕、评论和归档流程。
-- `browser_ai_subtitles=OK`：当公开接口只有 `ai-zh` 且 `subtitle_url` 为空时，走网页 AI 字幕。
+- `browser_ai_subtitles=OK`：当公开接口只有 `ai-zh` 且 `subtitle_url` 为空时，走 Chrome + `web-access` 网页 AI 字幕。
 - `audio_asr_fallback=OK`：只有字幕和网页 AI 字幕都不可得、且用户确实需要完整转写时，才走音频 ASR。
 - 某个增强能力缺失时，只说明该路线暂不可用；不要把它说成整个 skill 不可用。
+
+## 浏览器安全边界
+
+网页登录态只能通过 `web-access` 已授权的 Chrome 页面使用；脚本不读取、不打印、不复制浏览器 Cookie。
+
+禁止为了拿字幕执行这些操作：
+
+- 读取、解密或复制 Chrome / Edge 的 Cookie 数据库、Login Data、Local State 或用户 profile。
+- 复制用户真实 profile 到临时目录再启动浏览器。
+- 强制结束用户正在使用的 Chrome / Edge 进程来释放 profile 锁。
+- 用用户真实 profile 启动带 `--remote-debugging-port` 的 Chrome / Edge。
+- 使用 `--remote-allow-origins=*` 扩大调试端口暴露面。
+
+如果没有 Chrome + `web-access`，就跳过网页 AI 字幕，明确说明覆盖范围；不要用高风险浏览器操作换取登录态。
 
 ## 默认流程
 
@@ -75,7 +91,7 @@ $py = "python"
   --comments
 ```
 
-如果普通接口没有字幕，但网页播放器能拿到 AI 字幕，先用 `web-access` 打开视频页并取得 target id，然后加：
+如果普通接口没有字幕，但网页播放器能拿到 AI 字幕，先用 `web-access` 打开已登录 Chrome 里的视频页并取得 target id，然后加：
 
 ```powershell
 --browser-target "CDP_TARGET_ID"
@@ -102,9 +118,9 @@ $py = "python"
 
 ### 4. 下载网页 AI 字幕
 
-当 `subtitle_probe.json` 里有 `ai-zh`，但 `subtitle_url` 为空时，使用这条路线。
+当 `subtitle_probe.json` 里有 `ai-zh`，但 `subtitle_url` 为空时，使用这条路线。当前脚本需要 Chrome + `web-access` 的 `/targets` 和 `/eval` 代理接口；原生 Edge/Chrome DevTools 端口不能直接传给这个脚本。
 
-1. 用 `web-access` 打开 B站视频页，确认页面已加载。
+1. 用 `web-access` 打开已登录 Chrome 中的 B站视频页，确认页面已加载。
 2. 查看浏览器 target id：
 
 ```powershell
@@ -126,6 +142,8 @@ curl.exe -s http://localhost:3456/targets
 - `browser_ai_subtitles\*.subtitle.json`：B站原始字幕 JSON。
 
 这条路线让 B站页面自己用登录态请求 `/x/player/wbi/v2`，不读取、不打印浏览器 cookie。
+
+如果下载到的 AI 字幕明显乱码、内容与标题或课程主题不相干，不要把它当作可靠全文。优先标注“AI 字幕质量不可用”，再考虑 ASR 兜底；若 ASR 也不可用，只能基于分P标题、简介、评论和元数据生成有限学习指南，并明确局限。
 
 ### 5. 抓评论区
 

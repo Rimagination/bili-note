@@ -162,7 +162,13 @@ def evaluate_environment(
         },
         "browser_ai_subtitles": {
             "ok": bool(core_ok and web_access.get("ok")),
-            "needs": ["web-access skill", "open logged-in Bilibili video tab", "CDP target id"],
+            "needs": ["Chrome", "web-access skill", "open logged-in Bilibili video tab", "CDP target id"],
+            "supported_browser": "Chrome via web-access proxy",
+            "unsupported_login_methods": [
+                "copying browser profiles",
+                "reading Cookie databases",
+                "launching the user's real profile with a raw remote-debugging port",
+            ],
             "web_access": web_access,
         },
         "audio_asr_fallback": {
@@ -186,7 +192,7 @@ def evaluate_environment(
     if core_ok and not bilibili_api.get("ok"):
         recommendations.append("Check network access to Bilibili public APIs before running the default extraction path.")
     if core_ok and not web_access.get("ok"):
-        recommendations.append("Browser AI subtitles need web-access plus an opened Bilibili video page.")
+        recommendations.append("Browser AI subtitles need Chrome + web-access plus an opened logged-in Bilibili video page.")
     if core_ok and not commands["ffmpeg"]["ok"]:
         recommendations.append("Install ffmpeg before using audio ASR fallback.")
     if core_ok and not asr_backend_ok:
@@ -225,7 +231,7 @@ def print_human(report: dict[str, Any]) -> None:
     api = capabilities["public_subtitles_comments_archive"]["bilibili_api"]
     print(f"  Bilibili API: {'reachable' if api.get('reachable') else 'not reachable'}")
     print("  Python packages: stdlib only")
-    print(f"- Browser AI subtitles: {mark(capabilities['browser_ai_subtitles']['ok'])}")
+    print(f"- Browser AI subtitles (Chrome + web-access): {mark(capabilities['browser_ai_subtitles']['ok'])}")
     web_access = capabilities["browser_ai_subtitles"]["web_access"]
     print(
         "  web-access: "
