@@ -98,7 +98,7 @@ https://github.com/Rimagination/bili-note
 
 Bili Note 的默认路线尽量少依赖：元数据、公开字幕、评论、归档、证据索引和笔记预算都使用 Python 标准库，不需要先安装一堆 Python 包。网页 AI 字幕和音频转写属于增强路线，只有默认字幕不可用或用户明确需要兜底时才用。
 
-当前网页 AI 字幕路线明确依赖 **Chrome + web-access**：需要用户日常 Chrome 已登录 B 站，并且 `web-access` 能在 `http://localhost:3456/targets` 看到对应的 B 站视频页。Edge、Playwright Chromium、临时浏览器 profile、复制用户浏览器 profile、读取 Cookie 数据库，都不是本项目推荐或支持的登录态获取方式。
+当前网页 AI 字幕路线依赖 **Chrome + web-access**：需要用户日常 Chrome 已登录 B 站，并且 `web-access` 能在 `http://localhost:3456/targets` 看到对应的 B 站视频页。Edge、Playwright Chromium 和原生浏览器 CDP 端口目前不能直接用于这条路线。
 
 第一次使用或换机器后，可以先把这句话发给 Agent：
 
@@ -125,20 +125,6 @@ python scripts/check_environment.py
 | 开发测试 | 跑本项目测试 | `pytest` | 普通使用不需要 |
 
 因此，只装这个 skill 也可以先完成大多数公开视频的字幕、评论和归档；缺少的依赖只会影响相应的增强能力，不代表整个 skill 不可用。
-
-## 浏览器与安全边界
-
-网页 AI 字幕是最容易踩坑的路线。为了保护用户浏览器数据，Bili Note 只推荐通过 `web-access` 控制已授权的 Chrome 页面，让 B 站页面自己使用登录态请求字幕接口；脚本不会读取、打印或导出 Cookie。
-
-不要为了拿字幕做这些操作：
-
-- 复制 Chrome / Edge 用户配置目录，哪怕只是复制到临时文件夹。
-- 读取或解密浏览器 Cookie 数据库、Login Data、Local State 等文件。
-- 强制结束用户正在使用的 Chrome / Edge 进程来释放 profile 锁。
-- 用用户真实 profile 启动带 `--remote-debugging-port` 的浏览器。
-- 使用 `--remote-allow-origins=*` 这类扩大本地调试面暴露的参数。
-
-如果没有 Chrome + `web-access`，就把网页 AI 字幕标记为不可用，继续尝试公开字幕、评论归档或本地 ASR。若 B 站 AI 字幕明显乱码或术语严重错乱，不要把它当作可靠全文；应在笔记中说明字幕质量问题，并优先用评论、分 P 标题、公开视频信息或 ASR 兜底交叉验证。
 
 ## 写笔记的原则
 

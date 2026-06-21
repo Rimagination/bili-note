@@ -164,11 +164,6 @@ def evaluate_environment(
             "ok": bool(core_ok and web_access.get("ok")),
             "needs": ["Chrome", "web-access skill", "open logged-in Bilibili video tab", "CDP target id"],
             "supported_browser": "Chrome via web-access proxy",
-            "unsupported_login_methods": [
-                "copying browser profiles",
-                "reading Cookie databases",
-                "launching the user's real profile with a raw remote-debugging port",
-            ],
             "web_access": web_access,
         },
         "audio_asr_fallback": {

@@ -29,20 +29,7 @@ $py = "python"
 - `browser_ai_subtitles=OK`：当公开接口只有 `ai-zh` 且 `subtitle_url` 为空时，走 Chrome + `web-access` 网页 AI 字幕。
 - `audio_asr_fallback=OK`：只有字幕和网页 AI 字幕都不可得、且用户确实需要完整转写时，才走音频 ASR。
 - 某个增强能力缺失时，只说明该路线暂不可用；不要把它说成整个 skill 不可用。
-
-## 浏览器安全边界
-
-网页登录态只能通过 `web-access` 已授权的 Chrome 页面使用；脚本不读取、不打印、不复制浏览器 Cookie。
-
-禁止为了拿字幕执行这些操作：
-
-- 读取、解密或复制 Chrome / Edge 的 Cookie 数据库、Login Data、Local State 或用户 profile。
-- 复制用户真实 profile 到临时目录再启动浏览器。
-- 强制结束用户正在使用的 Chrome / Edge 进程来释放 profile 锁。
-- 用用户真实 profile 启动带 `--remote-debugging-port` 的 Chrome / Edge。
-- 使用 `--remote-allow-origins=*` 扩大调试端口暴露面。
-
-如果没有 Chrome + `web-access`，就跳过网页 AI 字幕，明确说明覆盖范围；不要用高风险浏览器操作换取登录态。
+- 网页登录态只通过 `web-access` 已授权的 Chrome 页面使用；不要读取或复制 Cookie/profile，不要强制结束用户浏览器进程。没有 Chrome + `web-access` 时就跳过网页 AI 字幕并说明覆盖范围。
 
 ## 默认流程
 
