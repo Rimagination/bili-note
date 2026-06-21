@@ -74,7 +74,7 @@ def as_int(value: Any) -> int:
 
 
 def copy_if_exists(src: Path, dst: Path) -> bool:
-    if not src.exists():
+    if not str(src) or src == Path(".") or not src.is_file():
         return False
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
@@ -91,6 +91,47 @@ def find_subtitle_manifest(extract_dir: Path) -> Path | None:
         if path.exists() and path.stat().st_size > 2:
             return path
     return None
+
+
+def transcript_manifest_from_run_summary(extract_dir: Path) -> dict[str, Any] | None:
+    summary_path = extract_dir / "run_summary.json"
+    if not summary_path.exists():
+        return None
+    summary = read_json(summary_path)
+    transcripts = summary.get("transcripts") or []
+    if not transcripts:
+        return None
+    outputs: list[dict[str, Any]] = []
+    for item in transcripts:
+        files: dict[str, str] = {}
+        if item.get("transcript_txt"):
+            files["txt"] = str(item["transcript_txt"])
+        if item.get("transcript_json"):
+            files["json"] = str(item["transcript_json"])
+        outputs.append(
+            {
+                "page": item.get("page"),
+                "cid": item.get("cid"),
+                "part": item.get("part"),
+                "duration": item.get("duration"),
+                "files": files,
+                "source": "asr_transcript",
+            }
+        )
+    return {
+        "source_manifest": "run_summary.json",
+        "bvid": summary.get("bvid"),
+        "aid": summary.get("aid"),
+        "outputs": outputs,
+    }
+
+
+def outputs_have_subtitle_files(outputs: list[dict[str, Any]]) -> bool:
+    for item in outputs:
+        files = item.get("files") or {}
+        if any(files.get(key) for key in ("json", "txt", "srt")):
+            return True
+    return False
 
 
 def existing_subtitle_summary(archive_dir: Path, manifest_path: Path) -> dict[str, Any]:
@@ -155,19 +196,31 @@ def existing_subtitle_summary(archive_dir: Path, manifest_path: Path) -> dict[st
 
 def archive_subtitles(extract_dir: Path, archive_dir: Path) -> dict[str, Any]:
     manifest_path = find_subtitle_manifest(extract_dir)
+    manifest: dict[str, Any] | list[Any] | None = None
     if not manifest_path:
-        existing_manifest = archive_dir / "metadata" / "subtitles_manifest.clean.json"
-        if existing_manifest.exists():
-            return existing_subtitle_summary(archive_dir, existing_manifest)
-        return {"available": False, "reason": "no subtitle manifest found"}
+        manifest = transcript_manifest_from_run_summary(extract_dir)
+        if manifest:
+            manifest_path = extract_dir / "run_summary.json"
+        else:
+            existing_manifest = archive_dir / "metadata" / "subtitles_manifest.clean.json"
+            if existing_manifest.exists():
+                return existing_subtitle_summary(archive_dir, existing_manifest)
+            return {"available": False, "reason": "no subtitle manifest found"}
 
-    manifest = read_json(manifest_path)
+    if manifest is None:
+        manifest = read_json(manifest_path)
     if isinstance(manifest, list):
         outputs = manifest
     elif isinstance(manifest, dict):
         outputs = manifest.get("outputs") or []
     else:
         outputs = []
+    if not outputs_have_subtitle_files(outputs):
+        transcript_manifest = transcript_manifest_from_run_summary(extract_dir)
+        if transcript_manifest and manifest_path.name != "run_summary.json":
+            manifest_path = extract_dir / "run_summary.json"
+            manifest = transcript_manifest
+            outputs = manifest.get("outputs") or []
 
     txt_dir = archive_dir / "subtitles" / "txt"
     srt_dir = archive_dir / "subtitles" / "srt"
@@ -248,7 +301,17 @@ def archive_subtitles(extract_dir: Path, archive_dir: Path) -> dict[str, Any]:
         evidence_no = 0
         if copied_json:
             payload = read_json(dst_json)
-            for seg_idx, seg in enumerate(payload.get("body") or [], 1):
+            segments = payload.get("body") or []
+            if not segments and isinstance(payload.get("segments"), list):
+                segments = [
+                    {
+                        "from": seg.get("start"),
+                        "to": seg.get("end"),
+                        "content": seg.get("text"),
+                    }
+                    for seg in payload["segments"]
+                ]
+            for seg_idx, seg in enumerate(segments, 1):
                 content = str(seg.get("content", "")).strip()
                 if not content:
                     continue
@@ -537,6 +600,7 @@ def archive_articles(extract_dir: Path, archive_dir: Path) -> dict[str, Any]:
 
 def combine_evidence_indexes(archive_dir: Path) -> int:
     index_dir = archive_dir / "indexes"
+    index_dir.mkdir(parents=True, exist_ok=True)
     sources = [
         index_dir / "字幕证据索引.jsonl",
         index_dir / "图文证据索引.jsonl",

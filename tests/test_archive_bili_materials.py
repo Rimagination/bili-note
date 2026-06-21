@@ -197,6 +197,69 @@ def test_archive_subtitles_falls_back_to_existing_clean_manifest(tmp_path):
     assert subtitle_info["subtitle_chars"] == 6
 
 
+def test_archive_subtitles_uses_asr_transcripts_from_run_summary(tmp_path):
+    module = load_module()
+    extract_dir = tmp_path / "extract"
+    archive_dir = tmp_path / "archive"
+    transcript_json = extract_dir / "p01.json"
+    transcript_txt = extract_dir / "p01.txt"
+    transcript_txt.parent.mkdir(parents=True)
+    transcript_txt.write_text("第一句 RAG 第二句 embedding\n", encoding="utf-8")
+    write_json(
+        transcript_json,
+        {
+            "segments": [
+                {"start": 0.0, "end": 1.5, "text": "第一句 RAG"},
+                {"start": 1.5, "end": 3.0, "text": "第二句 embedding"},
+            ]
+        },
+    )
+    write_json(
+        extract_dir / "browser_ai_subtitle_manifest.json",
+        {
+            "bvid": "BVasr",
+            "aid": 456,
+            "outputs": [
+                {
+                    "page": 1,
+                    "cid": "789",
+                    "part": "ASR 测试",
+                    "duration": 3,
+                    "subtitle": None,
+                    "error": "no subtitle_url",
+                }
+            ],
+        },
+    )
+    write_json(
+        extract_dir / "run_summary.json",
+        {
+            "bvid": "BVasr",
+            "aid": 456,
+            "transcripts": [
+                {
+                    "page": 1,
+                    "cid": "789",
+                    "part": "ASR 测试",
+                    "duration": 3,
+                    "transcript_txt": str(transcript_txt),
+                    "transcript_json": str(transcript_json),
+                }
+            ],
+        },
+    )
+
+    subtitle_info = module.archive_subtitles(extract_dir, archive_dir)
+
+    assert subtitle_info["available"] is True
+    assert subtitle_info["parts"] == 1
+    assert subtitle_info["subtitle_lines"] == 2
+    assert subtitle_info["evidence_blocks"] == 1
+    evidence = (archive_dir / "indexes" / "字幕证据索引.jsonl").read_text(encoding="utf-8")
+    assert "P01@00:00:00-00:00:03" in evidence
+    assert "embedding" in evidence
+
+
 def test_quality_metrics_use_engagement_and_publish_age(tmp_path):
     module = load_module()
     archive_dir = tmp_path / "archive"
