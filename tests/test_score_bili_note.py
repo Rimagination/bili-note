@@ -111,6 +111,18 @@ def test_score_note_counts_opus_evidence_and_content_chars(tmp_path):
     assert result["evidence_refs_in_note"] == 3
 
 
+def test_count_evidence_refs_reads_markdown_footnote_links():
+    module = load_module()
+    markdown = (
+        "关键判断用短脚注。[^e006][^p01-0000][^c123456]\n\n"
+        "[^e006]: [图文证据 E006](原始材料/O123_标题/indexes/图文证据索引.md#O123-E006)\n"
+        "[^p01-0000]: [字幕 P01](原始材料/BV123_标题/indexes/字幕证据索引.md#P01@00:00:00-00:00:20)\n"
+        "[^c123456]: [评论 C123456](原始材料/BV123_标题/comments/评论全集.md)\n"
+    )
+
+    assert module.count_evidence_refs(markdown) == 3
+
+
 def test_update_note_budget_section_writes_markdown_and_score(tmp_path):
     module = load_update_module()
     archive_dir = tmp_path / "archive"

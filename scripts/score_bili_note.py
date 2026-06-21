@@ -23,6 +23,7 @@ def visible_text_chars(markdown: str) -> int:
 
 
 def count_evidence_refs(markdown: str) -> int:
+    """Count evidence ids, including ids that appear inside Markdown footnote links."""
     opus_refs = re.findall(r"\bO\d+-E\d{3}\b", markdown)
     subtitle_refs = re.findall(r"P\d{2}@\d{2}:\d{2}:\d{2}-\d{2}:\d{2}:\d{2}", markdown)
     comment_refs = re.findall(r"\bC\d{6,}\b", markdown)
