@@ -54,7 +54,9 @@ def status_label(status: str | None) -> str:
     }.get(status or "", status or "未知")
 
 
-def status_advice(status: str | None) -> str:
+def status_advice(status: str | None, content_type: str | None = None) -> str:
+    if content_type == "opus" and status == "too_long":
+        return "如果这是深读版，接近 deep_note_chars 可接受；若只做快速浏览，压缩到核心判断、方案选择表和实践清单即可。"
     return {
         "too_short": "建议补充章节/分P层面的观点、方法步骤和证据；高信息量或高互动视频不宜压成短摘要。",
         "too_long": "建议压缩重复解释，保留核心判断、关键证据和可执行结论；短视频不必展开成课程笔记。",
@@ -65,15 +67,36 @@ def status_advice(status: str | None) -> str:
 def build_section(budget: dict[str, Any], score: dict[str, Any]) -> str:
     quality = budget.get("quality_metrics") or {}
     status = score.get("status")
-    lines = [
-        SECTION_TITLE,
-        "",
-        (
+    content_type = budget.get("content_type") or "video"
+    if content_type == "opus":
+        baseline = (
+            f"- 信息量基准：图文正文 {fmt_int(budget.get('content_chars'))} 字，"
+            f"估算阅读 {fmt_float(budget.get('reading_minutes_estimate'), 1)} 分钟，"
+            f"内容块 {fmt_int(budget.get('article_blocks'))}，"
+            f"证据块 {fmt_int(budget.get('all_evidence_blocks'))}；"
+            f"基准推荐 {fmt_int(budget.get('base_note_chars_min'))}-{fmt_int(budget.get('base_note_chars_max'))} 字。"
+        )
+        density = (
+            f"- 信噪比：当前/图文正文压缩比 {fmt_float(score.get('actual_compression_ratio'), 4)}；"
+            f"每阅读分钟笔记 {fmt_float(score.get('note_chars_per_reading_minute'), 1)} 字；"
+            f"证据引用 {fmt_int(score.get('evidence_refs_in_note'))}/{fmt_int(score.get('all_evidence_blocks'))}。"
+        )
+    else:
+        baseline = (
             f"- 信息量基准：视频 {fmt_float(budget.get('duration_minutes'), 1)} 分钟，"
             f"字幕 {fmt_int(budget.get('subtitle_chars'))} 字，"
             f"证据块 {fmt_int(budget.get('all_evidence_blocks'))}；"
             f"基准推荐 {fmt_int(budget.get('base_note_chars_min'))}-{fmt_int(budget.get('base_note_chars_max'))} 字。"
-        ),
+        )
+        density = (
+            f"- 信噪比：当前/字幕压缩比 {fmt_float(score.get('actual_compression_ratio'), 4)}；"
+            f"每分钟笔记 {fmt_float(score.get('note_chars_per_minute'), 1)} 字；"
+            f"证据引用 {fmt_int(score.get('evidence_refs_in_note'))}/{fmt_int(score.get('all_evidence_blocks'))}。"
+        )
+    lines = [
+        SECTION_TITLE,
+        "",
+        baseline,
         (
             f"- 互动质量：播放 {fmt_int(quality.get('view'))}，点赞 {fmt_int(quality.get('like'))}，"
             f"收藏 {fmt_int(quality.get('favorite'))}，投币 {fmt_int(quality.get('coin'))}，"
@@ -86,12 +109,8 @@ def build_section(budget: dict[str, Any], score: dict[str, Any]) -> str:
             f"- 推荐区间：{fmt_int(score.get('recommended_note_chars_min'))}-{fmt_int(score.get('recommended_note_chars_max'))} 字；"
             f"当前约 {fmt_int(score.get('actual_note_chars'))} 字，状态：{status_label(status)}。"
         ),
-        (
-            f"- 信噪比：当前/字幕压缩比 {fmt_float(score.get('actual_compression_ratio'), 4)}；"
-            f"每分钟笔记 {fmt_float(score.get('note_chars_per_minute'), 1)} 字；"
-            f"证据引用 {fmt_int(score.get('evidence_refs_in_note'))}/{fmt_int(score.get('all_evidence_blocks'))}。"
-        ),
-        f"- 调整建议：{status_advice(status)}热度只作为是否值得多写的辅助信号，不能替代内容证据。",
+        density,
+        f"- 调整建议：{status_advice(status, content_type)}热度只作为是否值得多写的辅助信号，不能替代内容证据。",
         "",
     ]
     return "\n".join(lines)

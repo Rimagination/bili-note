@@ -68,6 +68,49 @@ def test_score_note_against_budget(tmp_path):
     assert result["quality_metrics"]["quality_tier"] == "high"
 
 
+def test_score_note_counts_opus_evidence_and_content_chars(tmp_path):
+    module = load_module()
+    archive_dir = tmp_path / "archive"
+    note_path = tmp_path / "opus_note.md"
+    budget_path = archive_dir / "metadata" / "note_budget.json"
+    budget_path.parent.mkdir(parents=True)
+    budget_path.write_text(
+        json.dumps(
+            {
+                "content_type": "opus",
+                "content_chars": 20000,
+                "reading_minutes_estimate": 40,
+                "all_evidence_blocks": 10,
+                "recommended_note_chars_min": 100,
+                "recommended_note_chars_max": 500,
+                "base_note_chars_min": 90,
+                "base_note_chars_max": 700,
+                "quality_multiplier": 1.0,
+                "quality_metrics": {"quality_tier": "medium"},
+                "target_compression_ratio_min": 0.01,
+                "target_compression_ratio_max": 0.03,
+                "granularity": "long_article",
+                "writing_guidance": "保留文章结构。",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    note_path.write_text(
+        "# 图文\n\n"
+        + "这是图文笔记。" * 20
+        + "\n\n证据：O123-E001、O123-E002、C123456。",
+        encoding="utf-8",
+    )
+
+    result = module.score_note(archive_dir, note_path)
+
+    assert result["actual_compression_ratio"] > 0
+    assert result["note_chars_per_reading_minute"] > 0
+    assert result["note_chars_per_minute"] is None
+    assert result["evidence_refs_in_note"] == 3
+
+
 def test_update_note_budget_section_writes_markdown_and_score(tmp_path):
     module = load_update_module()
     archive_dir = tmp_path / "archive"
@@ -112,3 +155,41 @@ def test_update_note_budget_section_writes_markdown_and_score(tmp_path):
     assert "质量倍率 1.100" in text
     assert (archive_dir / "metadata" / "note_score.json").exists()
     assert score["quality_multiplier"] == 1.1
+
+
+def test_update_note_budget_section_uses_opus_wording(tmp_path):
+    module = load_update_module()
+    archive_dir = tmp_path / "archive"
+    note_path = tmp_path / "opus_note.md"
+    budget_path = archive_dir / "metadata" / "note_budget.json"
+    budget_path.parent.mkdir(parents=True)
+    budget_path.write_text(
+        json.dumps(
+            {
+                "content_type": "opus",
+                "content_chars": 20000,
+                "reading_minutes_estimate": 40,
+                "article_blocks": 200,
+                "all_evidence_blocks": 20,
+                "base_note_chars_min": 1000,
+                "base_note_chars_max": 2000,
+                "quality_multiplier": 1.0,
+                "quality_metrics": {"like": 10, "favorite": 5, "reply": 1},
+                "recommended_note_chars_min": 100,
+                "recommended_note_chars_max": 300,
+                "granularity": "long_article",
+                "writing_guidance": "保留文章结构。",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    note_path.write_text("# 图文\n\n## 核心观点\n\n正文 O123-E001。", encoding="utf-8")
+
+    score = module.update_note(note_path, archive_dir)
+
+    text = note_path.read_text(encoding="utf-8")
+    assert "图文正文" in text
+    assert "每阅读分钟笔记" in text
+    assert "当前/图文正文压缩比" in text
+    assert score["evidence_refs_in_note"] == 1
