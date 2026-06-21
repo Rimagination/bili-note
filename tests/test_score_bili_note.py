@@ -111,16 +111,31 @@ def test_score_note_counts_opus_evidence_and_content_chars(tmp_path):
     assert result["evidence_refs_in_note"] == 3
 
 
-def test_count_evidence_refs_reads_markdown_footnote_links():
+def test_count_evidence_refs_reads_numbered_reference_links():
     module = load_module()
     markdown = (
-        "关键判断用短脚注。[^e006][^p01-0000][^c123456]\n\n"
-        "[^e006]: [图文证据 E006](原始材料/O123_标题/indexes/图文证据索引.md#O123-E006)\n"
-        "[^p01-0000]: [字幕 P01](原始材料/BV123_标题/indexes/字幕证据索引.md#P01@00:00:00-00:00:20)\n"
-        "[^c123456]: [评论 C123456](原始材料/BV123_标题/comments/评论全集.md)\n"
+        "关键判断用论文式编号。[1][2][3]\n\n"
+        "1. [图文证据 E006](原始材料/O123_标题/indexes/图文证据索引.md#O123-E006)\n"
+        "2. [字幕 P01](原始材料/BV123_标题/indexes/字幕证据索引.md#P01@00:00:00-00:00:20)\n"
+        "3. [评论 C123456](原始材料/BV123_标题/comments/评论全集.md)\n"
+        "\n"
+        "[1]: 原始材料/O123_标题/indexes/图文证据索引.md#O123-E006 \"图文证据 E006\"\n"
+        "[2]: 原始材料/BV123_标题/indexes/字幕证据索引.md#P01@00:00:00-00:00:20 \"字幕 P01\"\n"
+        "[3]: 原始材料/BV123_标题/comments/评论全集.md \"评论 C123456\"\n"
     )
 
     assert module.count_evidence_refs(markdown) == 3
+
+
+def test_visible_text_chars_ignores_reference_link_definitions():
+    module = load_module()
+    markdown = (
+        "# 标题\n\n"
+        "正文需要计数。[1]\n\n"
+        "[1]: 原始材料/O123_标题/indexes/图文证据索引.md#O123-E006 \"图文证据 E006\"\n"
+    )
+
+    assert module.visible_text_chars(markdown) == len("标题正文需要计数。[1]")
 
 
 def test_update_note_budget_section_writes_markdown_and_score(tmp_path):

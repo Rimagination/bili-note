@@ -15,6 +15,7 @@ def read_json(path: Path) -> Any:
 
 def visible_text_chars(markdown: str) -> int:
     text = re.sub(r"```.*?```", "", markdown, flags=re.S)
+    text = re.sub(r"^[ \t]*\[[^\]]+\]:\s+\S+.*$", "", text, flags=re.M)
     text = re.sub(r"`([^`]*)`", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
     text = re.sub(r"^[#>\-\*\|\s:]+", "", text, flags=re.M)
@@ -23,7 +24,7 @@ def visible_text_chars(markdown: str) -> int:
 
 
 def count_evidence_refs(markdown: str) -> int:
-    """Count evidence ids, including ids that appear inside Markdown footnote links."""
+    """Count evidence ids, including ids that appear inside numbered reference links."""
     opus_refs = re.findall(r"\bO\d+-E\d{3}\b", markdown)
     subtitle_refs = re.findall(r"P\d{2}@\d{2}:\d{2}:\d{2}-\d{2}:\d{2}:\d{2}", markdown)
     comment_refs = re.findall(r"\bC\d{6,}\b", markdown)
