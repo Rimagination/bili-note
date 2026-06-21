@@ -43,9 +43,9 @@ $py = "python"
    - 如果字幕仍不可得，再按需要下载音频并用 ASR 转写。
 6. 用户要求评论区时，用 `--comments` 抓取主评论和子评论；写入笔记时过滤打卡、求资料、广告、闲聊等技术无关内容。
 7. 归档原始材料：把完整字幕或图文正文、图片、完整评论、元数据和 JSONL 索引存到知识库旁边的长期目录。
-8. 读取 `metadata/note_budget.json`：视频按时长、字幕字数、证据块、评论量和互动质量确定笔记字数区间；图文按正文长度、图片/代码/证据块、评论量和互动质量确定笔记字数区间。
-9. 写 Markdown：默认写成“学习型笔记”，目标是让人或 Agent 像学完一节课或读完一篇教程一样获得概念、方法、判断标准、实践步骤和自测题；来源、覆盖范围和归档路径放到后半部分。正文证据默认用论文式编号 `[1][2]`，不直接堆长证据 ID。
-10. 写完后用 `score_bili_note.py` 校验笔记字数、压缩比、每分钟/每篇笔记密度和证据引用比例；太短时优先补“学习收获、知识地图、概念卡、实战流程、坑点、自测题”，不要只堆分P摘要或段落摘要。
+8. 写前定标：必须先读取 `metadata/note_budget.json`，把推荐字数区间、压缩比目标、写作粒度、互动质量倍率和证据块数量作为本次笔记的写作目标。视频按时长、字幕字数、证据块、评论量和互动质量定标；图文按正文长度、图片/代码/证据块、评论量和互动质量定标。
+9. 按预算写 Markdown：默认写成“学习型笔记”，目标是让人或 Agent 像学完一节课或读完一篇教程一样获得概念、方法、判断标准、实践步骤和自测题；根据预算决定详略，不要把长课和短视频写成差不多字数。来源、覆盖范围和归档路径放到后半部分。正文证据默认用论文式编号 `[1][2]`，不直接堆长证据 ID。
+10. 写后验收：用 `score_bili_note.py` 校验笔记字数、压缩比、每分钟/每篇笔记密度和证据引用比例。评分只做 QA 和微调，不代替写前定标；太短时优先补“学习收获、知识地图、概念卡、实战流程、坑点、自测题”，不要只堆分P摘要或段落摘要。
 
 ## 常用命令
 
@@ -209,7 +209,21 @@ curl.exe -s http://localhost:3456/targets
 - `metadata/`：内容元数据、字幕清单、图文清单、评论清单。
 - `metadata/note_budget.json`：按内容信息量和互动质量生成的笔记预算，用于控制长短视频、长短图文的提炼粒度。
 
-### 8. 校验笔记字数和信噪比
+### 8. 写前读取预算，写后验收信噪比
+
+写笔记前先看预算。预算是本次笔记的目标，不是写完后才补救的报告：
+
+```powershell
+Get-Content -Encoding UTF8 "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx_视频短标题\metadata\note_budget.json"
+```
+
+重点先确定：
+
+- 推荐字数区间：`recommended_note_chars_min` 到 `recommended_note_chars_max`。
+- 写作粒度：`granularity` 和 `writing_guidance`。
+- 信息量基准：视频看 `duration_minutes`、`subtitle_chars`，图文看 `content_chars`、`reading_minutes_estimate`。
+- 质量倍率：`quality_multiplier` 和 `quality_metrics`，用于判断是否值得保留更多细节。
+- 证据规模：`all_evidence_blocks`，用于决定关键判断需要覆盖多少证据。
 
 写完最终 Markdown 后，用归档目录里的预算给笔记打分：
 
@@ -230,7 +244,7 @@ curl.exe -s http://localhost:3456/targets
 
 重点看：
 
-- `status`：`too_short` 表示遗漏风险高，`too_long` 表示可能重复堆料，`ok` 表示落在推荐区间。
+- `status`：`too_short` 表示遗漏风险高，`too_long` 表示可能重复堆料，`ok` 表示落在写前推荐区间。
 - `quality_multiplier`：点赞、收藏、投币、评论、弹幕、分享、播放量和发布距今天数形成的互动质量倍率。
 - `actual_compression_ratio`：笔记字数 / 字幕字数。长视频应允许更高总字数，但仍要保持压缩。
 - `note_chars_per_minute`：每分钟视频对应多少笔记字。长课程不应和短视频接近同一个总字数。
@@ -266,7 +280,8 @@ curl.exe -s http://localhost:3456/targets
 - 证据引用服务于学习，不要把笔记写成引用列表。正文默认使用统一的论文式数字编号，例如 `[1][2]`；图文证据、字幕证据、评论证据共用一套编号，按正文首次出现顺序递增。不要在正文段落里直接塞很长的 `O<opus_id>-E001`、`Pxx@hh:mm:ss-hh:mm:ss` 或 `C<rpid>`。
 - 在 `## 来源、覆盖与局限` 之前放 `## 证据脚注`。脚注用有序列表写明编号和证据链接，例如 `1. [图文证据 E006](原始材料/O.../indexes/图文证据索引.md#O...-E006)`；列表后再放 reference-style 链接定义，例如 `[1]: 原始材料/O.../indexes/图文证据索引.md#O...-E006 "图文证据 E006"`，让正文里的 `[1]` 也能点击跳转。
 - 保留 `## 证据与原文位置` 作为证据总览，但总览里也只写 `[1]`、`[2]` 这样的编号，不再直接显示长证据 ID。
-- 预算偏短时，优先补“概念解释、流程图式文字、实践清单、自测题、反例和边界”，不要只增加摘要段落。
+- 写前先按 `note_budget.json` 定标，再开始写笔记；写后评分只用于验收和微调，不要把主要长度决策推迟到评分阶段。
+- 预算偏短或写后评分过短时，优先补“概念解释、流程图式文字、实践清单、自测题、反例和边界”，不要只增加摘要段落。
 - 热度是“值得多写”的辅助信号，不是替代证据。点赞、收藏、评论、弹幕、投币、分享和发布距今天数会提高或降低推荐字数，但扩写必须来自图文正文、字幕、评论证据和内容结构。
 
 ### 不合格信号
@@ -301,6 +316,6 @@ curl.exe -s http://localhost:3456/targets
 - `scripts/extract_bilibili_opus.py`：B站图文/动态正文、图片、代码块和图文评论抓取。
 - `scripts/fetch_browser_ai_subtitles.py`：通过已登录网页播放器下载 B站 AI 字幕。
 - `scripts/archive_bili_materials.py`：归档完整材料，并生成全文索引和证据索引。
-- `scripts/score_bili_note.py`：按 `metadata/note_budget.json` 校验最终笔记的长度、压缩比和证据引用。
+- `scripts/score_bili_note.py`：按 `metadata/note_budget.json` 验收最终笔记的长度、压缩比和证据引用。
 - `scripts/update_note_budget_section.py`：把预算、互动质量和信噪比评分写回 Markdown 笔记。
 - `references/bilibili-api-notes.md`：接口细节和已知坑。
