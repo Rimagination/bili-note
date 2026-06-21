@@ -154,7 +154,6 @@ Bili Note 的设计和实现参考、依托了这些主要项目与生态：
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp)：可选音频下载兜底。
 - [FFmpeg](https://ffmpeg.org/)：可选音频转码。
 - [OpenAI Whisper](https://github.com/openai/whisper)、[faster-whisper](https://github.com/SYSTRAN/faster-whisper)、[FunASR](https://github.com/modelscope/FunASR)：可选 ASR 转写后端。
-- [pytest](https://pytest.org/) 与 [Shields.io](https://shields.io/)：测试框架和 README 徽章服务。
 
 ## 许可证
 
