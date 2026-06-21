@@ -89,6 +89,36 @@ https://github.com/Rimagination/bili-note
 帮我存放在：“D:\知识库\B站总结” 里
 ```
 
+## 依赖说明
+
+Bili Note 的默认路线尽量少依赖：元数据、公开字幕、评论、归档、证据索引和笔记预算都使用 Python 标准库，不需要先安装一堆 Python 包。网页 AI 字幕和音频转写属于增强路线，只有默认字幕不可用或用户明确需要兜底时才用。
+
+第一次使用或换机器后，可以先把这句话发给 Agent：
+
+```text
+请帮我检查 Bili Note 的运行环境是否就绪，并告诉我当前适合走字幕、网页 AI 字幕还是音频转写路线。
+```
+
+Agent 会运行：
+
+```powershell
+python scripts/check_environment.py
+```
+
+这个检查会覆盖 Python、本 skill 的脚本完整性、B 站公开接口、`web-access` 浏览器入口、`ffmpeg`、ASR 后端、`yt-dlp` 和 `pytest`。
+
+依赖按能力分层理解：
+
+| 层级 | 用来做什么 | 需要什么 | 缺失时怎么办 |
+| --- | --- | --- | --- |
+| 必需 | 启动核心工作流 | Python 3.10+、已安装本 skill、能访问 B 站公开接口 | 先修复 Python 或重新安装 skill |
+| 默认路线 | 抓元数据、公开字幕、评论、归档、生成索引和预算 | 无第三方 Python 包，使用标准库 | 这条路线应优先尝试 |
+| 推荐增强 | 获取网页播放器里的 B 站 AI 字幕 | `web-access` skill、已打开并登录的 B 站视频页、浏览器 target id | 没有时跳过网页 AI 字幕，说明覆盖范围 |
+| 可选兜底 | 视频完全没有可用字幕时做音频转写 | `ffmpeg`，以及 `faster-whisper` / `funasr` / `openai-whisper` 任一 ASR 后端；`yt-dlp` 只在音频下载失败时需要 | 不默认安装；只有用户要求无字幕也要转写时再补 |
+| 开发测试 | 跑本项目测试 | `pytest` | 普通使用不需要 |
+
+因此，只装这个 skill 也可以先完成大多数公开视频的字幕、评论和归档；缺少的依赖只会影响相应的增强能力，不代表整个 skill 不可用。
+
 ## 写笔记的原则
 
 - 先讲“为什么”和“怎么迁移使用”，再讲“视频说了什么”。
@@ -101,6 +131,7 @@ https://github.com/Rimagination/bili-note
 ## 相关文件
 
 - `SKILL.md`：Codex 使用这个 skill 时读取的完整工作流说明。
+- `scripts/check_environment.py`：检查核心工作流、B 站公开接口、网页 AI 字幕、音频 ASR 和测试依赖是否可用。
 - `scripts/run_bili_note.py`：一键运行元数据、字幕、评论、归档和证据索引流程。
 - `scripts/extract_bilibili.py`：抓取元数据、字幕、音频、ASR 和评论。
 - `scripts/fetch_browser_ai_subtitles.py`：通过已登录网页播放器下载 B 站 AI 字幕。

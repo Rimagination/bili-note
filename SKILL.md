@@ -9,19 +9,39 @@ description: Extract Bilibili videos into readable Markdown knowledge notes. Use
 
 联网或登录态操作必须先使用 `web-access`。
 
+## 依赖与环境检查
+
+默认路线尽量零第三方 Python 依赖：元数据、公开字幕、评论、归档、证据索引和笔记预算都用标准库完成。网页 AI 字幕和音频 ASR 是增强路线，不是启动门槛。
+
+第一次使用、换机器、用户怀疑依赖不全，或准备使用网页 AI 字幕 / ASR 兜底时，先运行：
+
+```powershell
+$skill = "$env:USERPROFILE\.codex\skills\bili-note"
+$py = "python"
+& $py "$skill\scripts\check_environment.py"
+```
+
+根据检查结果选择路线：
+
+- `public_subtitles_comments_archive=OK`：优先走默认字幕、评论和归档流程。
+- `browser_ai_subtitles=OK`：当公开接口只有 `ai-zh` 且 `subtitle_url` 为空时，走网页 AI 字幕。
+- `audio_asr_fallback=OK`：只有字幕和网页 AI 字幕都不可得、且用户确实需要完整转写时，才走音频 ASR。
+- 某个增强能力缺失时，只说明该路线暂不可用；不要把它说成整个 skill 不可用。
+
 ## 默认流程
 
 1. 读清用户要什么：视频链接、是否要评论区、保存路径、是否需要全文字幕或只要提炼。
-2. 优先用 `run_bili_note.py` 一键完成可自动化部分：元数据、字幕、评论、归档、证据索引。
-3. 优先下载字幕：
+2. 如果是首次使用、依赖状态不明、字幕抓取失败或用户要求 ASR，先用 `check_environment.py` 判断当前可走路线。
+3. 优先用 `run_bili_note.py` 一键完成可自动化部分：元数据、字幕、评论、归档、证据索引。
+4. 优先下载字幕：
    - 普通字幕 URL 可用时，直接用 `--download-subtitles`。
    - 如果普通接口显示 `ai-zh` 但 `subtitle_url` 为空，不要说“没有字幕”；改走“网页 AI 字幕”流程。
    - 如果字幕仍不可得，再按需要下载音频并用 ASR 转写。
-4. 用户要求评论区时，用 `--comments` 抓取主评论和子评论；写入笔记时过滤打卡、求资料、广告、闲聊等技术无关内容。
-5. 归档原始材料：把完整字幕、完整评论、元数据和 JSONL 索引存到知识库旁边的长期目录。
-6. 读取 `metadata/note_budget.json`：按视频时长、字幕字数、证据块、评论量和互动质量确定笔记字数区间，避免把短视频和长课程压成同一长度。
-7. 写 Markdown：默认写成“学习型笔记”，目标是让人或 Agent 像学完一节课一样获得概念、方法、判断标准、实践步骤和自测题；来源、覆盖范围和归档路径放到后半部分。
-8. 写完后用 `score_bili_note.py` 校验笔记字数、压缩比、每分钟笔记密度和证据引用比例；太短时优先补“学习收获、知识地图、概念卡、实战流程、坑点、自测题”，不要只堆分P摘要。
+5. 用户要求评论区时，用 `--comments` 抓取主评论和子评论；写入笔记时过滤打卡、求资料、广告、闲聊等技术无关内容。
+6. 归档原始材料：把完整字幕、完整评论、元数据和 JSONL 索引存到知识库旁边的长期目录。
+7. 读取 `metadata/note_budget.json`：按视频时长、字幕字数、证据块、评论量和互动质量确定笔记字数区间，避免把短视频和长课程压成同一长度。
+8. 写 Markdown：默认写成“学习型笔记”，目标是让人或 Agent 像学完一节课一样获得概念、方法、判断标准、实践步骤和自测题；来源、覆盖范围和归档路径放到后半部分。
+9. 写完后用 `score_bili_note.py` 校验笔记字数、压缩比、每分钟笔记密度和证据引用比例；太短时优先补“学习收获、知识地图、概念卡、实战流程、坑点、自测题”，不要只堆分P摘要。
 
 ## 常用命令
 
@@ -30,6 +50,18 @@ description: Extract Bilibili videos into readable Markdown knowledge notes. Use
 ```powershell
 $skill = "$env:USERPROFILE\.codex\skills\bili-note"
 $py = "python"
+```
+
+### 0. 检查依赖和可用路线
+
+```powershell
+& $py "$skill\scripts\check_environment.py"
+```
+
+需要给其他脚本读取时输出 JSON：
+
+```powershell
+& $py "$skill\scripts\check_environment.py" --json
 ```
 
 ### 1. 一键提取和归档
@@ -219,6 +251,7 @@ curl.exe -s http://localhost:3456/targets
 
 ## 相关文件
 
+- `scripts/check_environment.py`：检查核心流程、网页 AI 字幕、音频 ASR 和测试依赖是否可用。
 - `scripts/run_bili_note.py`：一键运行元数据、字幕、评论、归档和证据索引流程。
 - `scripts/extract_bilibili.py`：元数据、字幕探测、普通字幕、音频、ASR、评论抓取。
 - `scripts/fetch_browser_ai_subtitles.py`：通过已登录网页播放器下载 B站 AI 字幕。
