@@ -164,6 +164,10 @@ python scripts/check_environment.py
 - `scripts/score_bili_note.py`：按预算验收主笔记长度、压缩比和证据引用。
 - `scripts/update_note_budget_section.py`：把预算、互动质量和信噪比评分写回主笔记。
 
+## 社区友链
+
+- [LINUX DO](https://linux.do/)：一个关注开发者、开源项目与 AI 工具交流的社区。感谢社区佬友对开源工具和 Agent 工作流的讨论与反馈。
+
 ## 致谢
 
 Bili Note 的设计和实现参考、依托了这些主要项目与生态：
