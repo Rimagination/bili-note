@@ -68,3 +68,14 @@ python "<skill>\scripts\extract_bilibili.py" "<BVID>" --out "<tmp>" --parts "2,2
 ```
 
 Use `base` Whisper for speed. Use larger models only if the first pass is too noisy and the task justifies the time.
+
+## Sparse Subtitle / Transcript Handling
+
+Subtitle availability is not the same as full video understanding. After archiving, compare video duration with subtitle or ASR character count:
+
+- Long videos with very low `subtitle_chars_per_minute` may depend on PPT, boards, code editors, UI demos, product screens, or silent visual segments.
+- Do not write "complete extraction" or a full learning note from sparse subtitles alone.
+- Use representative keyframes/screenshots plus OCR or multimodal visual understanding before detailed synthesis.
+- If the active model/toolchain cannot inspect images, tell the user that this advanced step requires a vision-capable model or manual review, and label the current note as limited to subtitles, metadata, and comments.
+
+`metadata/note_budget.json.visual_dependency` is the canonical place to surface this warning to downstream writing and scoring steps.

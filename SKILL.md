@@ -13,6 +13,15 @@ description: Extract Bilibili videos and opus/article posts into readable Markdo
 
 Bili Note 与 DyNote 共享可复用本地资源。默认共享目录是 `%USERPROFILE%\.cache\rimagination-notes`，Qwen3-ASR 环境默认是 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`。如果任一 skill 已经安装过 Qwen3-ASR，另一个 skill 必须优先复用，不要重复安装。Hugging Face、Whisper 和 faster-whisper 缓存按本机通用缓存复用。
 
+## 字幕密度与视觉理解
+
+B 站视频优先拿字幕，但字幕/转写不等于完整理解。长视频如果字幕字数明显偏少，可能说明核心信息在画面、PPT、板书、代码演示、屏幕操作或无解说片段中。
+
+- 归档后必须读取 `metadata/note_budget.json`。如果 `visual_dependency.needs_visual_review=true`，不要把稀疏字幕写成完整学习笔记。
+- 这种情况下，先采用更合适的技术：抽取代表性关键帧或截图，再做 OCR 或多模态视觉理解；必要时重新抓网页 AI 字幕或补本地自动语音识别。
+- 如果当前接入的模型或工具不能看图，必须告诉用户：关键帧理解属于高级视觉能力，需要多模态模型、OCR 工具或人工查看；当前只能基于字幕/元数据生成有限笔记并标注覆盖范围。
+- 最终笔记和用户回复要转述 `visual_dependency.warnings`，并说明是否已经补了视觉证据。
+
 ## 依赖与环境检查
 
 默认路线尽量零第三方 Python 依赖：视频元数据、公开字幕、图文正文、图片清单、评论、归档、证据索引和笔记预算都用标准库完成。网页 AI 字幕和音频转写是增强路线，不是启动门槛。
@@ -45,7 +54,8 @@ $py = "python"
    - 如果字幕仍不可得，再按需要下载音频并用本地自动语音识别转写。中文优先 Qwen3-ASR，明确外语优先 Whisper 系后端。
 6. 用户要求评论区时，用 `--comments` 抓取主评论和子评论；写入笔记时过滤打卡、求资料、广告、闲聊等技术无关内容。
 7. 归档原始材料：把完整字幕或图文正文、图片、完整评论、元数据和 JSONL 索引存到知识库旁边的长期目录。
-8. 写前定标：必须先读取 `metadata/note_budget.json`，把推荐字数区间、压缩比目标、写作粒度、互动质量倍率和证据块数量作为本次笔记的写作目标。视频按时长、字幕字数、证据块、评论量和互动质量定标；图文按正文长度、图片/代码/证据块、评论量和互动质量定标。
+8. 写前定标：必须先读取 `metadata/note_budget.json`，把推荐字数区间、压缩比目标、写作粒度、互动质量倍率、证据块数量和 `visual_dependency` 作为本次笔记的写作目标。视频按时长、字幕字数、证据块、评论量和互动质量定标；图文按正文长度、图片/代码/证据块、评论量和互动质量定标。
+   - 如果 `visual_dependency.risk` 是 `medium` 或 `high`，先补关键帧/OCR/多模态视觉理解，或明确告诉用户当前缺少视觉理解能力，不能写成完整解析。
 9. 按预算写 Markdown：默认写成“学习型笔记”，目标是让人或 Agent 像学完一节课或读完一篇教程一样获得概念、方法、判断标准、实践步骤和自测题；根据预算决定详略，不要把长课和短视频写成差不多字数。来源、覆盖范围和归档路径放到后半部分。正文证据默认用论文式编号 `[1][2]`，不直接堆长证据 ID。
 10. 写后验收：用 `score_bili_note.py` 校验笔记字数、压缩比、每分钟/每篇笔记密度和证据引用比例。评分只做 QA 和微调，不代替写前定标；太短时优先补“学习收获、知识地图、概念卡、实战流程、坑点、自测题”，不要只堆分P摘要或段落摘要。
 
@@ -108,7 +118,7 @@ $py = "python"
 - `archive_dir/indexes/证据索引.jsonl`：写总结时可引用的图文/字幕/评论证据块。
 - `archive_dir/indexes/图文全集.md`：完整图文正文合集。
 - `archive_dir/indexes/字幕全集.md`：完整字幕合集。
-- `archive_dir/metadata/note_budget.json`：推荐笔记字数、压缩比和写作粒度。
+- `archive_dir/metadata/note_budget.json`：推荐笔记字数、压缩比、写作粒度和字幕稀疏时的画面依赖提示。
 
 ### 2. 抓元数据和分P目录
 
@@ -216,7 +226,7 @@ curl.exe -s http://localhost:3456/targets
 - `indexes/评论证据索引.jsonl`：按评论/回复生成的证据块。
 - `indexes/证据索引.jsonl`：图文/字幕证据和评论证据的合并索引。
 - `metadata/`：内容元数据、字幕清单、图文清单、评论清单。
-- `metadata/note_budget.json`：按内容信息量和互动质量生成的笔记预算，用于控制长短视频、长短图文的提炼粒度。
+- `metadata/note_budget.json`：按内容信息量和互动质量生成的笔记预算，用于控制长短视频、长短图文的提炼粒度，并提示字幕稀疏时的视觉补证需求。
 
 ### 8. 写前读取预算，写后验收信噪比
 
@@ -231,6 +241,7 @@ Get-Content -Encoding UTF8 "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx
 - 推荐字数区间：`recommended_note_chars_min` 到 `recommended_note_chars_max`。
 - 写作粒度：`granularity` 和 `writing_guidance`。
 - 信息量基准：视频看 `duration_minutes`、`subtitle_chars`，图文看 `content_chars`、`reading_minutes_estimate`。
+- 字幕密度：视频看 `subtitle_chars_per_minute` 和 `visual_dependency`；长视频字幕过少时先补关键帧/OCR/多模态视觉理解。
 - 质量倍率：`quality_multiplier` 和 `quality_metrics`，用于判断是否值得保留更多细节。
 - 证据规模：`all_evidence_blocks`，用于决定关键判断需要覆盖多少证据。
 
@@ -285,6 +296,7 @@ Get-Content -Encoding UTF8 "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx
 - 对课程型长视频，按学习模块组织，不要按分P机械压缩。每个模块至少包含：学习目标、核心概念、关键步骤、常见坑、可操作结论。
 - 对观点型短视频，按“问题背景 -> 作者判断 -> 论据 -> 适用边界 -> 对用户的启发”组织。
 - 对技术教程和图文长文，保留架构、数据流、代码思路、配置项、图片结论、评估方式和排错路径。
+- 如果长视频字幕/转写密度过低，先补视觉证据；没有多模态视觉能力时，明确把当前笔记标为“基于字幕/元数据的有限整理”。
 - 评论区只写有学习价值的内容：纠错、补充案例、实践经验、替代方案、争议点。
 - 证据引用服务于学习，不要把笔记写成引用列表。正文默认使用统一的论文式数字编号，例如 `[1][2]`；图文证据、字幕证据、评论证据共用一套编号，按正文首次出现顺序递增。不要在正文段落里直接塞很长的 `O<opus_id>-E001`、`Pxx@hh:mm:ss-hh:mm:ss` 或 `C<rpid>`。
 - 在 `## 来源、覆盖与局限` 之前放 `## 证据脚注`。脚注用有序列表写明编号和证据链接，例如 `1. [图文证据 E006](原始材料/O.../indexes/图文证据索引.md#O...-E006)`；列表后再放 reference-style 链接定义，例如 `[1]: 原始材料/O.../indexes/图文证据索引.md#O...-E006 "图文证据 E006"`，让正文里的 `[1]` 也能点击跳转。
@@ -298,6 +310,7 @@ Get-Content -Encoding UTF8 "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx
 - 开头大段来源信息，读者看半天还不知道学到了什么。
 - 只有“核心观点/分P提炼/代表性证据”，没有概念解释、方法步骤和自测。
 - 把每个分P压成一句话，长课程读完仍不知道怎么做。
+- 长视频字幕极少，却没有提示画面依赖，也没有补关键帧/OCR/视觉理解。
 - 只总结作者立场，不写适用条件、反例和失败场景。
 - 评论区只是罗列热评，没有转化成纠错、补充或实践提醒。
 
@@ -326,7 +339,7 @@ Get-Content -Encoding UTF8 "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx
 - `scripts/extract_bilibili.py`：元数据、字幕探测、普通字幕、音频、音频转写、评论抓取。
 - `scripts/extract_bilibili_opus.py`：B站图文/动态正文、图片、代码块和图文评论抓取。
 - `scripts/fetch_browser_ai_subtitles.py`：通过已登录网页播放器下载 B站 AI 字幕。
-- `scripts/archive_bili_materials.py`：归档完整材料，并生成全文索引和证据索引。
-- `scripts/score_bili_note.py`：按 `metadata/note_budget.json` 验收最终笔记的长度、压缩比和证据引用。
+- `scripts/archive_bili_materials.py`：归档完整材料，生成全文索引、证据索引和带字幕密度/视觉依赖提示的笔记预算。
+- `scripts/score_bili_note.py`：按 `metadata/note_budget.json` 验收最终笔记的长度、压缩比、证据引用和视觉依赖提示。
 - `scripts/update_note_budget_section.py`：把预算、互动质量和信噪比评分写回 Markdown 笔记。
 - `references/bilibili-api-notes.md`：接口细节和已知坑。

@@ -69,6 +69,8 @@ def score_note(archive_dir: Path, note_path: Path) -> dict[str, Any]:
         "note_chars_per_minute": round(actual_chars / duration_minutes, 3) if duration_minutes else None,
         "note_chars_per_reading_minute": round(actual_chars / reading_minutes, 3) if reading_minutes else None,
         "subtitle_chars_per_minute": budget.get("subtitle_chars_per_minute"),
+        "visual_dependency": budget.get("visual_dependency"),
+        "evidence_warnings": budget.get("evidence_warnings"),
         "evidence_refs_in_note": evidence_refs,
         "all_evidence_blocks": evidence_total,
         "evidence_reference_ratio": round(evidence_refs / evidence_total, 4) if evidence_total else None,

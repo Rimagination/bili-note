@@ -68,6 +68,10 @@ def build_section(budget: dict[str, Any], score: dict[str, Any]) -> str:
     quality = budget.get("quality_metrics") or {}
     status = score.get("status")
     content_type = budget.get("content_type") or "video"
+    visual_dependency = budget.get("visual_dependency") or {}
+    visual_warnings = visual_dependency.get("warnings") if isinstance(visual_dependency, dict) else []
+    if not isinstance(visual_warnings, list):
+        visual_warnings = []
     if content_type == "opus":
         baseline = (
             f"- 信息量基准：图文正文 {fmt_int(budget.get('content_chars'))} 字，"
@@ -111,8 +115,12 @@ def build_section(budget: dict[str, Any], score: dict[str, Any]) -> str:
         ),
         density,
         f"- 调整建议：{status_advice(status, content_type)}热度只作为是否值得多写的辅助信号，不能替代内容证据。",
-        "",
     ]
+    if visual_warnings:
+        lines.append("- 画面依赖提示：" + "；".join(str(item) for item in visual_warnings if item))
+        if visual_dependency.get("requires_multimodal_model"):
+            lines.append("- 高级补证：需要抽取关键帧并使用 OCR 或多模态视觉理解；如果当前接入模型不能看图，应先说明能力限制。")
+    lines.append("")
     return "\n".join(lines)
 
 

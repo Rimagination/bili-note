@@ -713,6 +713,72 @@ def extract_quality_metrics(archive_dir: Path, now: datetime | None = None) -> d
     }
 
 
+def assess_visual_dependency(duration_minutes: float, subtitle_chars: int, evidence_blocks: int, parts: int) -> dict[str, Any]:
+    density = subtitle_chars / duration_minutes if duration_minutes else None
+    warnings: list[str] = []
+    reasons: list[str] = []
+    suggested_next_steps: list[str] = []
+    risk = "low"
+
+    if duration_minutes >= 25 and subtitle_chars <= 800:
+        risk = "high"
+        reasons.append("long_video_sparse_subtitles")
+        warnings.append(
+            "视频时长较长但原始字幕/转写文本明显很少，核心信息可能在画面、板书、PPT、代码演示、屏幕操作或无解说片段中。不要只依赖稀疏字幕写完整学习笔记。"
+        )
+    elif duration_minutes >= 30 and density is not None and density < 120:
+        risk = "high"
+        reasons.append("low_subtitle_density")
+        warnings.append(
+            "字幕密度低于长视频常见讲述密度，建议补关键帧、截图 OCR 或多模态视觉理解后再写详细笔记。"
+        )
+    elif duration_minutes >= 15 and density is not None and density < 180:
+        risk = "medium"
+        reasons.append("medium_low_subtitle_density")
+        warnings.append(
+            "字幕/转写文本偏少，适合先写有限摘要；如果用户要详细课程笔记，应补视觉证据或明确覆盖范围。"
+        )
+
+    if duration_minutes >= 10 and subtitle_chars == 0:
+        risk = "high"
+        reasons.append("no_subtitle_text")
+        warnings.append(
+            "有视频时长但没有可用字幕/转写文本，不能把分P标题、简介或评论当作完整内容。需要重新抓字幕、音频转写，或抽取关键帧做视觉理解。"
+        )
+
+    if duration_minutes >= 30 and evidence_blocks <= max(1, parts):
+        if risk == "low":
+            risk = "medium"
+        reasons.append("few_evidence_blocks_for_duration")
+        warnings.append(
+            "长视频只有很少字幕证据块，章节覆盖可能不足；写模块化笔记前应补分段字幕、关键帧或人工检查。"
+        )
+
+    if risk in {"medium", "high"}:
+        suggested_next_steps = [
+            "先抽取代表性关键帧或截图，并用 OCR/多模态模型理解画面内容。",
+            "检查字幕是否只覆盖少量片段，必要时重新抓网页 AI 字幕或使用本地自动语音识别。",
+            "如果当前接入的模型不能看图，明确告诉用户：高级画面理解需要视觉模型或人工查看关键帧。",
+        ]
+
+    return {
+        "risk": risk,
+        "needs_visual_review": risk in {"medium", "high"},
+        "requires_multimodal_model": risk in {"medium", "high"},
+        "density_chars_per_minute": round(density, 3) if density is not None else None,
+        "reasons": reasons,
+        "warnings": warnings,
+        "suggested_next_steps": suggested_next_steps,
+        "guidance": (
+            "先补关键帧/OCR/多模态视觉理解，再写详细学习笔记；如果当前模型不能看图，要说明该高级功能需要视觉理解能力。"
+            if risk == "high"
+            else "如需详细拆解，补关键帧或视觉理解；若只基于字幕写作，必须明确覆盖范围。"
+            if risk == "medium"
+            else "当前字幕密度未显示明显画面依赖风险。"
+        ),
+    }
+
+
 def write_note_budget(
     archive_dir: Path,
     subtitle_info: dict[str, Any],
@@ -758,6 +824,20 @@ def write_note_budget(
     evidence_blocks_per_minute = round(evidence_blocks / duration_minutes, 3) if duration_minutes else None
     compression_ratio_min = round(target_min / content_chars, 4) if content_chars else None
     compression_ratio_max = round(target_max / content_chars, 4) if content_chars else None
+    visual_dependency = (
+        assess_visual_dependency(duration_minutes, subtitle_chars, evidence_blocks, parts)
+        if not has_article
+        else {
+            "risk": "not_applicable",
+            "needs_visual_review": False,
+            "requires_multimodal_model": False,
+            "density_chars_per_minute": None,
+            "reasons": [],
+            "warnings": [],
+            "suggested_next_steps": [],
+            "guidance": "图文内容按正文、图片清单和图文证据处理；图片含义需要另行视觉理解时单独说明。",
+        }
+    )
 
     if has_article and content_chars >= 12000:
         granularity = "long_article"
@@ -777,6 +857,8 @@ def write_note_budget(
     else:
         granularity = "short_video"
         writing_guidance = "以核心观点、证据和少量实践建议为主，避免过度扩写。"
+    if visual_dependency.get("needs_visual_review"):
+        writing_guidance += " " + str(visual_dependency.get("guidance"))
 
     budget = {
         "content_type": "opus" if has_article else "video",
@@ -789,6 +871,8 @@ def write_note_budget(
         "subtitle_lines": subtitle_info.get("subtitle_lines"),
         "subtitle_chars": subtitle_chars,
         "subtitle_chars_per_minute": subtitle_chars_per_minute,
+        "visual_dependency": visual_dependency,
+        "evidence_warnings": visual_dependency.get("warnings") or [],
         "subtitle_evidence_blocks": evidence_blocks,
         "comment_records": comment_records,
         "all_evidence_blocks": evidence_count,
@@ -885,6 +969,11 @@ def summarize_metadata_for_readme(metadata_info: dict[str, bool]) -> str:
 
 def summarize_budget_for_readme(note_budget: dict[str, Any]) -> str:
     quality = note_budget.get("quality_metrics") or {}
+    visual_dependency = note_budget.get("visual_dependency") or {}
+    warnings = visual_dependency.get("warnings") if isinstance(visual_dependency, dict) else []
+    visual_note = ""
+    if warnings:
+        visual_note = " 画面依赖提示：" + "；".join(str(item) for item in warnings if item)
     engagement = ""
     if quality.get("available"):
         engagement = (
@@ -904,7 +993,7 @@ def summarize_budget_for_readme(note_budget: dict[str, Any]) -> str:
     return (
         f"推荐笔记长度 {fmt_readme_number(note_budget.get('recommended_note_chars_min'))}-"
         f"{fmt_readme_number(note_budget.get('recommended_note_chars_max'))} 字；"
-        f"{engagement}{note_budget.get('writing_guidance')}"
+        f"{engagement}{note_budget.get('writing_guidance')}{visual_note}"
     )
 
 

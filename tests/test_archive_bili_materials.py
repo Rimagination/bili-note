@@ -171,6 +171,32 @@ def test_archive_articles_builds_indexes_and_article_budget(tmp_path):
     assert "O图文证据ID" in readme
 
 
+def test_sparse_video_subtitles_warn_visual_dependency(tmp_path):
+    module = load_module()
+    archive_dir = tmp_path / "archive"
+    subtitle_info = {
+        "available": True,
+        "parts": 1,
+        "duration_minutes": 45,
+        "subtitle_lines": 3,
+        "subtitle_chars": 120,
+        "subtitle_chars_per_minute": 2.667,
+        "evidence_blocks": 1,
+    }
+    comment_info = {"available": False}
+
+    note_budget = module.write_note_budget(archive_dir, subtitle_info, comment_info, evidence_count=1)
+    module.write_readme(archive_dir, subtitle_info, {"available": False}, comment_info, {}, note_budget)
+
+    assert note_budget["visual_dependency"]["risk"] == "high"
+    assert note_budget["visual_dependency"]["needs_visual_review"] is True
+    assert note_budget["visual_dependency"]["requires_multimodal_model"] is True
+    assert note_budget["evidence_warnings"]
+    assert "多模态视觉理解" in note_budget["writing_guidance"]
+    readme = (archive_dir / "README.md").read_text(encoding="utf-8")
+    assert "画面依赖提示" in readme
+
+
 def test_archive_subtitles_falls_back_to_existing_clean_manifest(tmp_path):
     module = load_module()
     extract_dir = tmp_path / "extract"

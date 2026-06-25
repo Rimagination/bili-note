@@ -46,6 +46,8 @@ def test_score_note_against_budget(tmp_path):
                 "target_compression_ratio_max": 0.03,
                 "granularity": "short_video",
                 "writing_guidance": "保留核心观点。",
+                "visual_dependency": {"risk": "low", "needs_visual_review": False, "warnings": []},
+                "evidence_warnings": [],
             },
             ensure_ascii=False,
         ),
@@ -66,6 +68,7 @@ def test_score_note_against_budget(tmp_path):
     assert result["evidence_refs_in_note"] == 2
     assert result["quality_multiplier"] == 1.1
     assert result["quality_metrics"]["quality_tier"] == "high"
+    assert result["visual_dependency"]["risk"] == "low"
 
 
 def test_score_note_counts_opus_evidence_and_content_chars(tmp_path):
@@ -168,6 +171,13 @@ def test_update_note_budget_section_writes_markdown_and_score(tmp_path):
                 "recommended_note_chars_max": 300,
                 "granularity": "short_video",
                 "writing_guidance": "保留核心观点。",
+                "visual_dependency": {
+                    "risk": "high",
+                    "needs_visual_review": True,
+                    "requires_multimodal_model": True,
+                    "warnings": ["视频时长较长但原始字幕/转写文本明显很少。"],
+                },
+                "evidence_warnings": ["视频时长较长但原始字幕/转写文本明显很少。"],
             },
             ensure_ascii=False,
         ),
@@ -180,6 +190,8 @@ def test_update_note_budget_section_writes_markdown_and_score(tmp_path):
     text = note_path.read_text(encoding="utf-8")
     assert "## 笔记预算与信噪比" in text
     assert "质量倍率 1.100" in text
+    assert "画面依赖提示" in text
+    assert "高级补证" in text
     assert (archive_dir / "metadata" / "note_score.json").exists()
     assert score["quality_multiplier"] == 1.1
 
