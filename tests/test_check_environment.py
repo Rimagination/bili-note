@@ -51,6 +51,7 @@ def test_evaluate_environment_reports_ready_optional_paths():
         find_spec=fake_find_spec,
         web_check=fake_web_check,
         api_check=fake_api_check,
+        qwen_probe=lambda find_spec: {"ok": True, "python": "C:/cache/qwen/python.exe"},
     )
 
     assert report["capabilities"]["core"]["ok"]
@@ -81,6 +82,7 @@ def test_evaluate_environment_keeps_core_ready_when_optional_tools_are_missing()
         find_spec=fake_find_spec,
         web_check=fake_web_check,
         api_check=fake_api_check,
+        qwen_probe=lambda find_spec: {"ok": False, "python": None},
     )
 
     assert report["capabilities"]["core"]["ok"]
@@ -89,7 +91,7 @@ def test_evaluate_environment_keeps_core_ready_when_optional_tools_are_missing()
     assert not report["capabilities"]["audio_asr_fallback"]["ok"]
     assert not report["capabilities"]["developer_tests"]["ok"]
     assert any("ffmpeg" in item for item in report["recommendations"])
-    assert any("ASR" in item for item in report["recommendations"])
+    assert any("Qwen3-ASR" in item for item in report["recommendations"])
 
 
 def test_evaluate_environment_marks_public_route_unavailable_when_bilibili_api_fails():
@@ -104,6 +106,7 @@ def test_evaluate_environment_marks_public_route_unavailable_when_bilibili_api_f
         find_spec=lambda name: object() if name == "pytest" else None,
         web_check=lambda cdp_url, timeout: {"ok": False, "reachable": False, "target_count": 0, "url": cdp_url},
         api_check=fake_api_check,
+        qwen_probe=lambda find_spec: {"ok": False, "python": None},
     )
 
     assert report["capabilities"]["core"]["ok"]

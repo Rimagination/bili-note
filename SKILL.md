@@ -11,11 +11,13 @@ description: Extract Bilibili videos and opus/article posts into readable Markdo
 
 网页 AI 字幕当前只支持 Chrome + `web-access` 路线：让已登录的 B站页面自己请求字幕接口。不要把 Edge、Playwright 临时浏览器或原生 CDP 端口当成等价替代，除非脚本已经明确支持。
 
+Bili Note 与 DyNote 共享可复用本地资源。默认共享目录是 `%USERPROFILE%\.cache\rimagination-notes`，Qwen3-ASR 环境默认是 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`。如果任一 skill 已经安装过 Qwen3-ASR，另一个 skill 必须优先复用，不要重复安装。Hugging Face、Whisper 和 faster-whisper 缓存按本机通用缓存复用。
+
 ## 依赖与环境检查
 
-默认路线尽量零第三方 Python 依赖：视频元数据、公开字幕、图文正文、图片清单、评论、归档、证据索引和笔记预算都用标准库完成。网页 AI 字幕和音频 ASR 是增强路线，不是启动门槛。
+默认路线尽量零第三方 Python 依赖：视频元数据、公开字幕、图文正文、图片清单、评论、归档、证据索引和笔记预算都用标准库完成。网页 AI 字幕和音频转写是增强路线，不是启动门槛。
 
-第一次使用、换机器、用户怀疑依赖不全，或准备使用网页 AI 字幕 / ASR 兜底时，先运行：
+第一次使用、换机器、用户怀疑依赖不全，或准备使用网页 AI 字幕 / 音频转写兜底时，先运行：
 
 ```powershell
 $skill = "$env:USERPROFILE\.codex\skills\bili-note"
@@ -27,20 +29,20 @@ $py = "python"
 
 - `public_subtitles_comments_archive=OK`：优先走默认字幕/图文、评论和归档流程。
 - `browser_ai_subtitles=OK`：当公开接口只有 `ai-zh` 且 `subtitle_url` 为空时，走 Chrome + `web-access` 网页 AI 字幕。
-- `audio_asr_fallback=OK`：只有字幕和网页 AI 字幕都不可得、且用户确实需要完整转写时，才走音频 ASR。
+- `audio_asr_fallback=OK`：只有字幕和网页 AI 字幕都不可得、且用户确实需要完整转写时，才走音频转写。中文或未指定语言优先共享 Qwen3-ASR；明确外语视频优先 Whisper 系后端。
 - 某个增强能力缺失时，只说明该路线暂不可用；不要把它说成整个 skill 不可用。
 - 网页登录态只通过 `web-access` 已授权的 Chrome 页面使用；不要读取或复制 Cookie/profile，不要强制结束用户浏览器进程。没有 Chrome + `web-access` 时就跳过网页 AI 字幕并说明覆盖范围。
 
 ## 默认流程
 
 1. 读清用户要什么：视频或图文链接、是否要评论区、保存路径、是否需要全文材料或只要提炼。
-2. 如果是首次使用、依赖状态不明、字幕抓取失败或用户要求 ASR，先用 `check_environment.py` 判断当前可走路线。
+2. 如果是首次使用、依赖状态不明、字幕抓取失败或用户要求音频转写，先用 `check_environment.py` 判断当前可走路线。
 3. 优先用 `run_bili_note.py` 一键完成可自动化部分。它会自动识别 `/video/BV...`、`/opus/...`、`/dynamic/...` 或纯 opus id。
 4. 如果是图文/动态，走 `extract_bilibili_opus.py` 路线：抓正文、标题、作者、发布时间、图片、代码块、图文证据索引；用户加 `--comments` 时抓图文评论。
 5. 如果是视频，优先下载字幕：
    - 普通字幕 URL 可用时，直接用 `--download-subtitles`。
    - 如果普通接口显示 `ai-zh` 但 `subtitle_url` 为空，不要说“没有字幕”；改走“网页 AI 字幕”流程。
-   - 如果字幕仍不可得，再按需要下载音频并用 ASR 转写。
+   - 如果字幕仍不可得，再按需要下载音频并用本地自动语音识别转写。中文优先 Qwen3-ASR，明确外语优先 Whisper 系后端。
 6. 用户要求评论区时，用 `--comments` 抓取主评论和子评论；写入笔记时过滤打卡、求资料、广告、闲聊等技术无关内容。
 7. 归档原始材料：把完整字幕或图文正文、图片、完整评论、元数据和 JSONL 索引存到知识库旁边的长期目录。
 8. 写前定标：必须先读取 `metadata/note_budget.json`，把推荐字数区间、压缩比目标、写作粒度、互动质量倍率和证据块数量作为本次笔记的写作目标。视频按时长、字幕字数、证据块、评论量和互动质量定标；图文按正文长度、图片/代码/证据块、评论量和互动质量定标。
@@ -163,18 +165,25 @@ curl.exe -s http://localhost:3456/targets
 
 抓取后检查 `comments.md` 和 `comments_raw.json`。写入最终笔记时，只保留与内容主题相关的评论、纠错、技术补充、实践经验和有价值问题。
 
-### 6. 音频 ASR 兜底
+### 6. 音频转写兜底
 
-只有在字幕和网页 AI 字幕都不可用时才用 ASR。长视频不要默认全量转写，除非用户明确要求。
+只有在字幕和网页 AI 字幕都不可用时才用本地自动语音识别。长视频不要默认全量转写，除非用户明确要求。中文或未指定语言默认 `--asr-backend auto` 会优先共享 Qwen3-ASR；明确外语视频时用 Whisper 系后端。
 
 ```powershell
 & $py "$skill\scripts\extract_bilibili.py" "BVxxxx" --out ".\tmp_bili_extract" --parts "1,10,38" --download-audio --transcribe --asr-backend auto --asr-model base
 ```
 
-中文视频优先尝试：
+首次使用 Qwen3-ASR 前先安装共享环境：
 
 ```powershell
-& $py "$skill\scripts\extract_bilibili.py" "BVxxxx" --out ".\tmp_bili_extract" --parts "1,10,38" --download-audio --transcribe --asr-backend funasr --asr-model "iic/SenseVoiceSmall"
+& $py "$skill\scripts\setup_qwen_asr_env.py"
+& $py "$skill\scripts\check_environment.py"
+```
+
+中文视频可显式指定 Qwen3-ASR：
+
+```powershell
+& $py "$skill\scripts\extract_bilibili.py" "BVxxxx" --out ".\tmp_bili_extract" --parts "1,10,38" --download-audio --transcribe --asr-backend qwen3-asr
 ```
 
 ### 7. 归档完整材料
@@ -310,9 +319,11 @@ Get-Content -Encoding UTF8 "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx
 
 ## 相关文件
 
-- `scripts/check_environment.py`：检查核心流程、网页 AI 字幕、音频 ASR 和测试依赖是否可用。
+- `scripts/check_environment.py`：检查核心流程、网页 AI 字幕、音频转写和测试依赖是否可用。
+- `scripts/setup_qwen_asr_env.py`：创建/更新共享的 Qwen3-ASR Python 环境。
+- `scripts/run_qwen_asr.py`：调用 Qwen3-ASR-0.6B，可按 chunk 分段避免显存溢出。
 - `scripts/run_bili_note.py`：一键运行视频/图文提取、评论、归档和证据索引流程。
-- `scripts/extract_bilibili.py`：元数据、字幕探测、普通字幕、音频、ASR、评论抓取。
+- `scripts/extract_bilibili.py`：元数据、字幕探测、普通字幕、音频、音频转写、评论抓取。
 - `scripts/extract_bilibili_opus.py`：B站图文/动态正文、图片、代码块和图文评论抓取。
 - `scripts/fetch_browser_ai_subtitles.py`：通过已登录网页播放器下载 B站 AI 字幕。
 - `scripts/archive_bili_materials.py`：归档完整材料，并生成全文索引和证据索引。

@@ -21,6 +21,7 @@ from pathlib import Path
 
 BASE = "https://api.bilibili.com"
 TZ = timezone(timedelta(hours=8))
+DEFAULT_QWEN_MODEL = "Qwen/Qwen3-ASR-0.6B"
 MIXIN_KEY_ENC_TAB = [
     46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
     27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
@@ -37,6 +38,46 @@ def configure_stdout() -> None:
 
 
 configure_stdout()
+
+
+def is_chinese_language(value: str | None) -> bool:
+    key = (value or "").strip().lower()
+    return key in {"", "zh", "zh-cn", "zh_cn", "cn", "chinese", "mandarin"}
+
+
+def qwen_venv_python_paths(venv: Path) -> list[Path]:
+    return [venv / "Scripts" / "python.exe", venv / "bin" / "python"]
+
+
+def qwen_python_candidates(explicit: str | None = None) -> list[str]:
+    candidates: list[str] = []
+    if explicit:
+        candidates.append(explicit)
+    for env_name in ("RIMAGINATION_QWEN_PYTHON", "BILI_NOTE_QWEN_PYTHON", "DOUYIN_NOTE_QWEN_PYTHON"):
+        if os.environ.get(env_name):
+            candidates.append(os.environ[env_name])
+    shared_cache = Path(os.environ.get("RIMAGINATION_NOTE_CACHE", Path.home() / ".cache" / "rimagination-notes")).expanduser()
+    for venv in [
+        shared_cache / "qwen3-asr-venv",
+        Path.home() / ".cache" / "dy-note" / "qwen3-asr-venv",
+        Path.home() / ".cache" / "douyin-note" / "qwen3-asr-venv",
+    ]:
+        candidates.extend(str(path) for path in qwen_venv_python_paths(venv))
+    candidates.append(sys.executable)
+    return candidates
+
+
+def find_qwen_python(explicit: str | None = None) -> str:
+    for candidate in qwen_python_candidates(explicit):
+        if candidate and Path(candidate).exists():
+            return candidate
+    return explicit or sys.executable
+
+
+def qwen_available() -> bool:
+    if importlib.util.find_spec("qwen_asr"):
+        return True
+    return any(Path(candidate).exists() for candidate in qwen_python_candidates(None)[:-1])
 
 
 def headers(bvid: str | None = None) -> dict[str, str]:
@@ -145,7 +186,7 @@ def write_bilibili_subtitle_outputs(payload: dict, out_dir: Path, stem: str, lan
     return {"json": str(json_path), "txt": str(txt_path), "srt": str(srt_path)}
 
 
-def resolve_asr_backend(requested: str) -> str:
+def resolve_asr_backend(requested: str, language: str = "zh") -> str:
     aliases = {
         "whisper": "openai-whisper",
         "openai": "openai-whisper",
@@ -154,6 +195,9 @@ def resolve_asr_backend(requested: str) -> str:
         "faster-whisper": "faster-whisper",
         "funasr": "funasr",
         "sensevoice": "funasr",
+        "qwen": "qwen3-asr",
+        "qwen3": "qwen3-asr",
+        "qwen3-asr": "qwen3-asr",
         "auto": "auto",
     }
     key = aliases.get((requested or "auto").lower())
@@ -161,19 +205,24 @@ def resolve_asr_backend(requested: str) -> str:
         raise ValueError(f"Unsupported ASR backend: {requested}")
     if key != "auto":
         return key
-    for module_name, backend in (
-        ("faster_whisper", "faster-whisper"),
-        ("funasr", "funasr"),
-        ("whisper", "openai-whisper"),
-    ):
+    if is_chinese_language(language) and qwen_available():
+        return "qwen3-asr"
+    for module_name, backend in (("faster_whisper", "faster-whisper"), ("whisper", "openai-whisper")):
         if importlib.util.find_spec(module_name):
             return backend
+    for module_name, backend in (("funasr", "funasr"),):
+        if importlib.util.find_spec(module_name):
+            return backend
+    if qwen_available():
+        return "qwen3-asr"
     return "openai-whisper"
 
 
 def asr_default_model(backend: str, asr_model: str | None, whisper_model: str | None) -> str:
     if asr_model:
         return asr_model
+    if backend == "qwen3-asr":
+        return DEFAULT_QWEN_MODEL
     if backend == "funasr":
         return "iic/SenseVoiceSmall"
     return whisper_model or "base"
@@ -510,6 +559,69 @@ def transcribe_wavs_funasr(
     return results
 
 
+def qwen_language(value: str) -> str:
+    return "Chinese" if is_chinese_language(value) else value
+
+
+def transcribe_wavs_qwen(
+    manifest: list[dict],
+    out_dir: Path,
+    model_name: str,
+    language: str,
+    qwen_python: str | None,
+    device_map: str,
+    dtype: str,
+    max_new_tokens: int,
+    chunk_seconds: float,
+    force: bool = False,
+) -> list[dict]:
+    helper = Path(__file__).with_name("run_qwen_asr.py")
+    if not helper.exists():
+        raise RuntimeError(f"Qwen helper script not found: {helper}")
+
+    python = find_qwen_python(qwen_python)
+    results = []
+    for item in manifest:
+        stem = f"p{int(item['page']):02d}_{item['cid']}"
+        txt_path = out_dir / f"{stem}.txt"
+        json_path = out_dir / f"{stem}.json"
+        if txt_path.exists() and json_path.exists() and not force:
+            results.append({**item, "transcript_txt": str(txt_path), "transcript_json": str(json_path)})
+            continue
+
+        cmd = [
+            python,
+            str(helper),
+            "--audio",
+            str(item["wav"]),
+            "--out",
+            str(json_path),
+            "--model",
+            model_name,
+            "--language",
+            qwen_language(language),
+            "--device-map",
+            device_map,
+            "--dtype",
+            dtype,
+            "--max-new-tokens",
+            str(max_new_tokens),
+            "--chunk-seconds",
+            str(chunk_seconds),
+        ]
+        env = os.environ.copy()
+        env.setdefault("PYTHONUTF8", "1")
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", env=env)
+        if result.returncode != 0:
+            detail = result.stderr[-1600:] or result.stdout[-1600:]
+            raise RuntimeError(f"Qwen3-ASR failed using {python}: {detail}")
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        text = str(data.get("text") or "").strip()
+        txt_path.write_text(text, encoding="utf-8")
+        results.append({**item, "transcript_txt": str(txt_path), "transcript_json": str(json_path)})
+    return results
+
+
 def transcribe_wavs(
     manifest: list[dict],
     out_dir: Path,
@@ -520,9 +632,27 @@ def transcribe_wavs(
     device: str = "auto",
     compute_type: str = "auto",
     language: str = "zh",
+    qwen_python: str | None = None,
+    qwen_device_map: str = "auto",
+    qwen_dtype: str = "auto",
+    qwen_max_new_tokens: int = 8192,
+    qwen_chunk_seconds: float = 60.0,
 ) -> list[dict]:
     add_site_packages(site_packages)
-    resolved_backend = resolve_asr_backend(backend)
+    resolved_backend = resolve_asr_backend(backend, language)
+    if resolved_backend == "qwen3-asr":
+        return transcribe_wavs_qwen(
+            manifest,
+            out_dir,
+            model_name,
+            language,
+            qwen_python,
+            qwen_device_map,
+            qwen_dtype,
+            qwen_max_new_tokens,
+            qwen_chunk_seconds,
+            force,
+        )
     if resolved_backend == "faster-whisper":
         return transcribe_wavs_faster_whisper(manifest, out_dir, model_name, language, device, compute_type, force)
     if resolved_backend == "funasr":
@@ -842,12 +972,17 @@ def main() -> int:
     parser.add_argument("--audio-source", choices=["auto", "bilibili-api", "yt-dlp"], default="auto", help="Audio downloader to use")
     parser.add_argument("--cookies-from-browser", help="Browser name for yt-dlp cookies, e.g. chrome or edge")
     parser.add_argument("--transcribe", action="store_true", help="Run local ASR on selected WAV files")
-    parser.add_argument("--asr-backend", default="auto", help="'auto', 'faster-whisper', 'funasr', or 'openai-whisper'")
+    parser.add_argument("--asr-backend", default="auto", help="'auto', 'qwen3-asr', 'faster-whisper', 'funasr', or 'openai-whisper'")
     parser.add_argument("--asr-model", help="ASR model name; defaults depend on backend")
     parser.add_argument("--asr-device", default="auto", help="'auto', 'cpu', 'cuda', or backend-specific device")
     parser.add_argument("--asr-compute-type", default="auto", help="faster-whisper compute type, e.g. float16, int8")
     parser.add_argument("--asr-language", default="zh", help="ASR language code")
     parser.add_argument("--asr-site-packages", action="append", default=[], help="Extra site-packages path for ASR imports; can repeat")
+    parser.add_argument("--qwen-python", help="Python executable for the shared qwen-asr environment")
+    parser.add_argument("--qwen-device-map", default="auto", help="Qwen device_map: auto, cuda:0, cpu, etc.")
+    parser.add_argument("--qwen-dtype", default="auto", help="Qwen dtype: auto, bfloat16, float16, float32.")
+    parser.add_argument("--qwen-max-new-tokens", type=int, default=8192, help="Maximum generated tokens for Qwen3-ASR long audio.")
+    parser.add_argument("--qwen-chunk-seconds", type=float, default=60.0, help="Chunk length for Qwen3-ASR to avoid GPU OOM; use 0 to disable.")
     parser.add_argument("--whisper-model", help="Legacy OpenAI Whisper model name")
     parser.add_argument("--whisper-site-packages", help="Legacy extra site-packages path for importing whisper")
     parser.add_argument("--comments", action="store_true", help="Fetch WBI comments and child replies")
@@ -888,7 +1023,7 @@ def main() -> int:
         if args.whisper_site_packages:
             site_packages.append(args.whisper_site_packages)
         add_site_packages(site_packages)
-        backend = resolve_asr_backend(args.asr_backend)
+        backend = resolve_asr_backend(args.asr_backend, args.asr_language)
         model_name = asr_default_model(backend, args.asr_model, args.whisper_model)
         transcript_results = transcribe_wavs(
             manifest,
@@ -900,6 +1035,11 @@ def main() -> int:
             args.asr_device,
             args.asr_compute_type,
             args.asr_language,
+            args.qwen_python,
+            args.qwen_device_map,
+            args.qwen_dtype,
+            args.qwen_max_new_tokens,
+            args.qwen_chunk_seconds,
         )
 
     comments = None

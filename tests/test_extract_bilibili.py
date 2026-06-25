@@ -28,6 +28,7 @@ def test_help_exposes_asr_backend_options():
     assert "--asr-model" in result.stdout
     assert "--asr-device" in result.stdout
     assert "--asr-compute-type" in result.stdout
+    assert "--qwen-python" in result.stdout
     assert "--download-subtitles" in result.stdout
 
 
@@ -40,9 +41,19 @@ def test_resolve_asr_backend_auto_prefers_faster_whisper(monkeypatch):
         return object() if available.get(name) else None
 
     monkeypatch.setattr(module.importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setattr(module, "qwen_available", lambda: False)
 
-    assert module.resolve_asr_backend("auto") == "faster-whisper"
+    assert module.resolve_asr_backend("auto", "en") == "faster-whisper"
     assert module.resolve_asr_backend("funasr") == "funasr"
+
+
+def test_resolve_asr_backend_auto_prefers_qwen_for_chinese(monkeypatch):
+    module = load_module()
+
+    monkeypatch.setattr(module, "qwen_available", lambda: True)
+
+    assert module.resolve_asr_backend("auto", "zh") == "qwen3-asr"
+    assert module.resolve_asr_backend("auto", "Chinese") == "qwen3-asr"
 
 
 def test_write_bilibili_subtitle_outputs(tmp_path):

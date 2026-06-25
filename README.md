@@ -110,16 +110,12 @@ https://github.com/Rimagination/bili-note
 帮我存放在：“D:\知识库\B站总结” 里
 ```
 
-## 依赖说明
+## 依赖与环境检测
 
-Bili Note 的默认路线尽量少依赖：视频元数据、公开字幕、图文正文、图片清单、评论、归档、证据索引和笔记预算都使用 Python 标准库，不需要先安装一堆 Python 包。网页 AI 字幕和音频转写属于增强路线，只有默认字幕不可用或用户明确需要兜底时才用。
-
-当前网页 AI 字幕路线依赖 **Chrome + web-access**：需要用户日常 Chrome 已登录 B 站，并且 `web-access` 能在 `http://localhost:3456/targets` 看到对应的 B 站视频页。Edge、Playwright Chromium 和原生浏览器 CDP 端口目前不能直接用于这条路线。
-
-第一次使用或换机器后，可以先把这句话发给 Agent：
+第一次使用、换机器、字幕路线失败，或准备转写音频前，先让 Agent 检查环境：
 
 ```text
-请帮我检查 Bili Note 的运行环境是否就绪，并告诉我当前适合走字幕、网页 AI 字幕还是音频转写路线。
+请帮我检查 Bili Note 的运行环境，并告诉我当前能走公开字幕、网页 AI 字幕、中文 Qwen3-ASR 还是 Whisper 兜底。
 ```
 
 Agent 会运行：
@@ -128,19 +124,38 @@ Agent 会运行：
 python scripts/check_environment.py
 ```
 
-这个检查会覆盖 Python、本 skill 的脚本完整性、B 站公开接口、Chrome + `web-access` 浏览器入口、`ffmpeg`、ASR 后端、`yt-dlp` 和 `pytest`。
+Bili Note 和 DyNote 会共享可复用资源。默认共享目录是：
+
+```text
+%USERPROFILE%\.cache\rimagination-notes
+```
+
+其中 Qwen3-ASR 虚拟环境默认放在：
+
+```text
+%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv
+```
+
+因此，只要任意一个 skill 已经引导你安装过 Qwen3-ASR，另一个 skill 会优先复用同一套环境和模型缓存。Hugging Face 模型缓存、Whisper 缓存和 faster-whisper 缓存也按本机通用缓存复用，不会绑定到某一个 skill。
 
 依赖按能力分层理解：
 
 | 层级 | 用来做什么 | 需要什么 | 缺失时怎么办 |
 | --- | --- | --- | --- |
-| 必需 | 启动核心工作流 | Python 3.10+、已安装本 skill、能访问 B 站公开接口 | 先修复 Python 或重新安装 skill |
-| 默认路线 | 抓元数据、公开字幕、图文正文、图片清单、评论、归档、生成索引和预算 | 无第三方 Python 包，使用标准库 | 这条路线应优先尝试 |
-| 推荐增强 | 获取网页播放器里的 B 站 AI 字幕 | Chrome、`web-access` skill、已打开并登录的 B 站视频页、浏览器 target id | 没有时跳过网页 AI 字幕，说明覆盖范围 |
-| 可选兜底 | 视频完全没有可用字幕时做音频转写 | `ffmpeg`，以及 `faster-whisper` / `funasr` / `openai-whisper` 任一 ASR 后端；`yt-dlp` 只在音频下载失败时需要 | 不默认安装；只有用户要求无字幕也要转写时再补 |
+| 必需 | 启动 skill、抓公开元数据、整理已有材料 | Python 3.10+、已安装本 skill、能访问 B 站公开接口 | 先修复 Python、网络或重新安装 skill |
+| 登录浏览器 | 网页 AI 字幕 | Chrome、`web-access`、当前 Chrome 已登录 B 站并打开视频页 | 没有时跳过网页 AI 字幕，说明覆盖范围 |
+| 中文转写 | 中文字幕不可用时做高可读转写 | `ffmpeg`、共享 Qwen3-ASR 环境 | 运行 `scripts/setup_qwen_asr_env.py`，两个 skill 共用 |
+| 外语转写 | 外语视频转写 | `ffmpeg`、Whisper / faster-whisper | 只有外语视频或 Qwen 不适合时再装 |
+| 下载兜底 | B 站公开音频下载失败时兜底 | `yt-dlp` | 需要时再装，不是默认依赖 |
 | 开发测试 | 跑本项目测试 | `pytest` | 普通使用不需要 |
 
-因此，只装这个 skill 也可以先完成大多数公开视频和公开视频图文的正文、字幕、评论和归档；缺少的依赖只会影响相应的增强能力，不代表整个 skill 不可用。
+默认策略：B 站公开视频优先走公开字幕和网页 AI 字幕；确实需要音频转写时，中文或未指定语言的视频优先 Qwen3-ASR，明确是外语视频时优先 Whisper 系后端。需要手动指定时，可以用 `--asr-backend qwen3-asr` 或 `--asr-backend faster-whisper`。
+
+## 登录和隐私
+
+网页 AI 字幕路线只使用 Chrome + `web-access`：让已登录的 B 站页面自己请求字幕接口。Bili Note 不读取、不导出、不保存 Cookie、localStorage、浏览器 profile 或登录 token。
+
+如果没有可用 Chrome 登录态，Bili Note 会跳过网页 AI 字幕，改用公开字幕、图文正文、评论、音频转写或有限材料整理，并明确说明覆盖范围。Edge、Playwright Chromium 和原生浏览器 CDP 端口目前不能直接替代这条路线。
 
 ## 写笔记的原则
 
@@ -155,9 +170,11 @@ python scripts/check_environment.py
 ## 相关文件
 
 - `SKILL.md`：Codex 使用这个 skill 时读取的完整工作流说明。
-- `scripts/check_environment.py`：检查核心工作流、B 站公开接口、网页 AI 字幕、音频 ASR 和测试依赖是否可用。
+- `scripts/check_environment.py`：检查核心工作流、B 站公开接口、网页 AI 字幕、音频转写和测试依赖是否可用。
+- `scripts/setup_qwen_asr_env.py`：创建或复用共享 Qwen3-ASR 环境，默认位于 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`。
+- `scripts/run_qwen_asr.py`：调用 Qwen3-ASR-0.6B，可按 chunk 分段避免显存溢出。
 - `scripts/run_bili_note.py`：一键运行视频/图文提取、评论、归档和证据索引流程。
-- `scripts/extract_bilibili.py`：抓取元数据、字幕、音频、ASR 和评论。
+- `scripts/extract_bilibili.py`：抓取元数据、字幕、音频、音频转写和评论。
 - `scripts/extract_bilibili_opus.py`：抓取 B 站图文/动态正文、图片、代码块和图文评论。
 - `scripts/fetch_browser_ai_subtitles.py`：通过已登录网页播放器下载 B 站 AI 字幕。
 - `scripts/archive_bili_materials.py`：归档完整材料并生成全文索引和证据索引。
@@ -175,7 +192,8 @@ Bili Note 的设计和实现参考、依托了这些主要项目与生态：
 - [Bilibili](https://www.bilibili.com/)：视频、字幕、评论和互动数据来源。
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp)：可选音频下载兜底。
 - [FFmpeg](https://ffmpeg.org/)：可选音频转码。
-- [OpenAI Whisper](https://github.com/openai/whisper)、[faster-whisper](https://github.com/SYSTRAN/faster-whisper)、[FunASR](https://github.com/modelscope/FunASR)：可选 ASR 转写后端。
+- [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-0.6B)：可选中文本地自动语音识别后端。
+- [OpenAI Whisper](https://github.com/openai/whisper)、[faster-whisper](https://github.com/SYSTRAN/faster-whisper)、[FunASR](https://github.com/modelscope/FunASR)：可选外语视频转写后端。
 
 ## 许可证
 
