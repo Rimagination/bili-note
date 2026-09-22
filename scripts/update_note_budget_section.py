@@ -69,6 +69,7 @@ def build_section(budget: dict[str, Any], score: dict[str, Any]) -> str:
     status = score.get("status")
     content_type = budget.get("content_type") or "video"
     visual_dependency = budget.get("visual_dependency") or {}
+    visual_review = budget.get("visual_review") or {}
     visual_warnings = visual_dependency.get("warnings") if isinstance(visual_dependency, dict) else []
     if not isinstance(visual_warnings, list):
         visual_warnings = []
@@ -120,6 +121,19 @@ def build_section(budget: dict[str, Any], score: dict[str, Any]) -> str:
         lines.append("- 画面依赖提示：" + "；".join(str(item) for item in visual_warnings if item))
         if visual_dependency.get("requires_multimodal_model"):
             lines.append("- 高级补证：需要抽取关键帧并使用 OCR 或多模态视觉理解；如果当前接入模型不能看图，应先说明能力限制。")
+    if content_type == "video" and "visual_review" in budget:
+        if visual_review.get("available") and visual_review.get("visual_review_completed"):
+            lines.append(
+                f"- 关键帧视觉证据：已归档 {fmt_int(visual_review.get('frame_count'))} 张，"
+                "可用 `KF-Pxx-xx` 回查联系图和单帧。"
+            )
+        elif visual_review.get("available"):
+            lines.append(
+                f"- 关键帧素材：已归档 {fmt_int(visual_review.get('frame_count'))} 张；"
+                "视觉观察尚未写入 `metadata/visual_review.md`。"
+            )
+        else:
+            lines.append(f"- 关键帧视觉证据：{visual_review.get('reason', '本次未生成')}。")
     lines.append("")
     return "\n".join(lines)
 

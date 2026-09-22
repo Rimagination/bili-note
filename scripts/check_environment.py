@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
@@ -22,6 +23,8 @@ REQUIRED_SCRIPTS = (
     "extract_bilibili.py",
     "extract_bilibili_opus.py",
     "fetch_browser_ai_subtitles.py",
+    "edge_cdp.py",
+    "extract_video_keyframes.py",
     "archive_bili_materials.py",
     "score_bili_note.py",
     "update_note_budget_section.py",
@@ -147,6 +150,43 @@ def check_web_access(cdp_url: str = "http://localhost:3456/targets", timeout: fl
     }
 
 
+def check_edge_cdp(cdp_url: str = "http://127.0.0.1:9222", timeout: float = 0.7) -> dict[str, Any]:
+    endpoint = f"{cdp_url.rstrip('/')}/json/list"
+    try:
+        req = urllib.request.Request(endpoint, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        data = json.loads(raw or "[]")
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reachable": False,
+            "target_count": 0,
+            "bilibili_video_target": False,
+            "url": endpoint,
+            "error": type(exc).__name__,
+            "message": str(exc),
+        }
+
+    targets = data if isinstance(data, list) else []
+    video_target = False
+    for item in targets:
+        if not isinstance(item, dict) or item.get("type") != "page":
+            continue
+        parsed = urllib.parse.urlsplit(str(item.get("url") or ""))
+        hostname = (parsed.hostname or "").lower().rstrip(".")
+        if (hostname == "bilibili.com" or hostname.endswith(".bilibili.com")) and parsed.path.startswith("/video/"):
+            video_target = True
+            break
+    return {
+        "ok": video_target,
+        "reachable": True,
+        "target_count": len(targets),
+        "bilibili_video_target": video_target,
+        "url": endpoint,
+    }
+
+
 def check_bilibili_api(api_url: str = "https://api.bilibili.com/x/web-interface/nav", timeout: float = 1.5) -> dict[str, Any]:
     try:
         req = urllib.request.Request(
@@ -185,9 +225,11 @@ def evaluate_environment(
     which: Callable[[str], str | None] = shutil.which,
     find_spec: Callable[[str], object | None] = importlib.util.find_spec,
     web_check: Callable[[str, float], dict[str, Any]] = check_web_access,
+    edge_check: Callable[[str, float], dict[str, Any]] = check_edge_cdp,
     api_check: Callable[[str, float], dict[str, Any]] = check_bilibili_api,
     qwen_probe: Callable[[Callable[[str], object | None]], dict[str, Any]] = probe_qwen_python,
     cdp_url: str = "http://localhost:3456/targets",
+    edge_cdp_url: str = "http://127.0.0.1:9222",
     api_url: str = "https://api.bilibili.com/x/web-interface/nav",
     timeout: float = 0.7,
 ) -> dict[str, Any]:
@@ -197,8 +239,9 @@ def evaluate_environment(
         "ffmpeg": command_status("ffmpeg", which),
         "yt-dlp": command_status("yt-dlp", which),
     }
-    modules = {name: module_status(name, find_spec) for name in (*ASR_MODULES.keys(), "yt_dlp", "pytest")}
+    modules = {name: module_status(name, find_spec) for name in (*ASR_MODULES.keys(), "yt_dlp", "websocket", "pytest")}
     web_access = web_check(cdp_url, timeout)
+    edge_cdp = edge_check(edge_cdp_url, timeout)
     bilibili_api = api_check(api_url, max(timeout, 1.5))
     qwen = qwen_probe(find_spec)
     shared_cache = shared_cache_dir()
@@ -225,6 +268,17 @@ def evaluate_environment(
             "supported_browser": "Chrome via web-access proxy",
             "web_access": web_access,
         },
+        "edge_browser_ai_subtitles": {
+            "ok": bool(core_ok and modules["websocket"]["ok"] and edge_cdp.get("ok")),
+            "dependency_ready": bool(core_ok and modules["websocket"]["ok"]),
+            "endpoint_reachable": bool(edge_cdp.get("reachable")),
+            "bilibili_video_target": bool(edge_cdp.get("bilibili_video_target")),
+            "needs": ["Microsoft Edge started with remote debugging", "websocket-client", "open logged-in Bilibili video tab"],
+            "supported_browser": "Microsoft Edge via direct CDP",
+            "websocket_client": modules["websocket"],
+            "edge_cdp": edge_cdp,
+            "note": "Pass --browser edge; the default endpoint is http://127.0.0.1:9222.",
+        },
         "audio_asr_fallback": {
             "ok": bool(core_ok and commands["ffmpeg"]["ok"] and (qwen.get("ok") or asr_backend_ok)),
             "needs": ["ffmpeg", "Qwen3-ASR for Chinese or one Whisper-family ASR backend for foreign-language video"],
@@ -233,6 +287,13 @@ def evaluate_environment(
             "asr_backends": {name: modules[name] for name in ASR_MODULES},
             "yt_dlp_available": yt_dlp_ok,
             "note": "yt-dlp is optional unless Bilibili API audio download fails.",
+        },
+        "keyframe_visual_review": {
+            "ok": bool(core_ok and commands["ffmpeg"]["ok"]),
+            "needs": ["ffmpeg", "a public Bilibili video stream or yt-dlp", "a vision-capable model for interpretation"],
+            "ffmpeg": commands["ffmpeg"],
+            "yt_dlp_available": yt_dlp_ok,
+            "note": "The runner creates one 4x3 contact sheet with up to 12 representative frames; visual interpretation is performed by the active Agent.",
         },
         "developer_tests": {
             "ok": bool(modules["pytest"]["ok"]),
@@ -249,8 +310,15 @@ def evaluate_environment(
         recommendations.append("Check network access to Bilibili public APIs before running the default extraction path.")
     if core_ok and not web_access.get("ok"):
         recommendations.append("Browser AI subtitles need Chrome + web-access plus an opened logged-in Bilibili video page.")
+    if core_ok and not modules["websocket"]["ok"]:
+        recommendations.append("Edge browser AI subtitles need the optional websocket-client package: python -m pip install websocket-client.")
+    if core_ok and modules["websocket"]["ok"] and not edge_cdp.get("reachable"):
+        recommendations.append("Start Edge with --remote-debugging-port=9222 before using --browser edge.")
+    elif core_ok and modules["websocket"]["ok"] and not edge_cdp.get("bilibili_video_target"):
+        recommendations.append("Open a logged-in Bilibili video tab in the Edge remote-debugging instance before using --browser edge.")
     if core_ok and not commands["ffmpeg"]["ok"]:
         recommendations.append("Install ffmpeg before using audio ASR fallback.")
+        recommendations.append("Install ffmpeg before using keyframe visual review.")
     if core_ok and not qwen.get("ok"):
         recommendations.append("For Chinese videos, run scripts/setup_qwen_asr_env.py once to set up Qwen3-ASR; DyNote and Bili Note will share it.")
     if core_ok and not asr_backend_ok:
@@ -304,6 +372,13 @@ def print_human(report: dict[str, Any]) -> None:
         f"{'reachable' if web_access.get('reachable') else 'not reachable'}, "
         f"targets={web_access.get('target_count', 0)}"
     )
+    print(f"- Browser AI subtitles (Edge direct CDP): {mark(capabilities['edge_browser_ai_subtitles']['ok'])}")
+    edge_cdp = capabilities["edge_browser_ai_subtitles"]["edge_cdp"]
+    print(
+        "  Edge CDP: "
+        f"{'reachable' if edge_cdp.get('reachable') else 'not reachable'}, "
+        f"video_targets={'yes' if edge_cdp.get('bilibili_video_target') else 'no'}"
+    )
     print(f"- Audio ASR fallback: {mark(capabilities['audio_asr_fallback']['ok'])}")
     print(f"  ffmpeg: {mark(report['commands']['ffmpeg']['ok'])}")
     print(f"  Qwen3-ASR for Chinese: {mark(report['qwen3_asr']['ok'])}")
@@ -312,6 +387,8 @@ def print_human(report: dict[str, Any]) -> None:
         + ", ".join(f"{label}={mark(report['modules'][name]['ok'])}" for name, label in ASR_MODULES.items())
     )
     print(f"  yt-dlp optional: {mark(capabilities['audio_asr_fallback']['yt_dlp_available'])}")
+    print(f"- Keyframe visual review: {mark(capabilities['keyframe_visual_review']['ok'])}")
+    print(f"  yt-dlp fallback: {mark(capabilities['keyframe_visual_review']['yt_dlp_available'])}")
     print(f"- Shared cache: {report['shared_resources']['cache_dir']}")
     print(f"- Developer tests: {mark(capabilities['developer_tests']['ok'])}")
 
@@ -327,11 +404,17 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     parser.add_argument("--strict", action="store_true", help="Exit non-zero when the core workflow is unavailable")
     parser.add_argument("--cdp-url", default="http://localhost:3456/targets", help="web-access targets endpoint")
+    parser.add_argument("--edge-cdp-url", default="http://127.0.0.1:9222", help="Edge remote-debugging HTTP endpoint")
     parser.add_argument("--api-url", default="https://api.bilibili.com/x/web-interface/nav", help="Bilibili public API probe endpoint")
     parser.add_argument("--timeout", type=float, default=0.7, help="CDP probe timeout in seconds")
     args = parser.parse_args()
 
-    report = evaluate_environment(cdp_url=args.cdp_url, api_url=args.api_url, timeout=args.timeout)
+    report = evaluate_environment(
+        cdp_url=args.cdp_url,
+        edge_cdp_url=args.edge_cdp_url,
+        api_url=args.api_url,
+        timeout=args.timeout,
+    )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

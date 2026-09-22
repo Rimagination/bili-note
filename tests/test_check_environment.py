@@ -27,6 +27,7 @@ def test_check_environment_help_exposes_json_and_strict_options():
     assert "--json" in result.stdout
     assert "--strict" in result.stdout
     assert "--cdp-url" in result.stdout
+    assert "--edge-cdp-url" in result.stdout
     assert "--api-url" in result.stdout
 
 
@@ -37,10 +38,13 @@ def test_evaluate_environment_reports_ready_optional_paths():
         return {"ffmpeg": "C:/tools/ffmpeg.exe", "yt-dlp": "C:/tools/yt-dlp.exe"}.get(name)
 
     def fake_find_spec(name):
-        return object() if name in {"faster_whisper", "pytest"} else None
+        return object() if name in {"faster_whisper", "websocket", "pytest"} else None
 
     def fake_web_check(cdp_url, timeout):
         return {"ok": True, "reachable": True, "target_count": 1, "url": cdp_url}
+
+    def fake_edge_check(cdp_url, timeout):
+        return {"ok": True, "reachable": True, "target_count": 1, "bilibili_video_target": True, "url": cdp_url}
 
     def fake_api_check(api_url, timeout):
         return {"ok": True, "reachable": True, "url": api_url, "code": 0}
@@ -50,6 +54,7 @@ def test_evaluate_environment_reports_ready_optional_paths():
         which=fake_which,
         find_spec=fake_find_spec,
         web_check=fake_web_check,
+        edge_check=fake_edge_check,
         api_check=fake_api_check,
         qwen_probe=lambda find_spec: {"ok": True, "python": "C:/cache/qwen/python.exe"},
     )
@@ -57,6 +62,7 @@ def test_evaluate_environment_reports_ready_optional_paths():
     assert report["capabilities"]["core"]["ok"]
     assert report["capabilities"]["public_subtitles_comments_archive"]["ok"]
     assert report["capabilities"]["browser_ai_subtitles"]["ok"]
+    assert report["capabilities"]["edge_browser_ai_subtitles"]["ok"]
     assert report["capabilities"]["audio_asr_fallback"]["ok"]
     assert report["capabilities"]["developer_tests"]["ok"]
 
@@ -73,6 +79,9 @@ def test_evaluate_environment_keeps_core_ready_when_optional_tools_are_missing()
     def fake_web_check(cdp_url, timeout):
         return {"ok": False, "reachable": False, "target_count": 0, "url": cdp_url}
 
+    def fake_edge_check(cdp_url, timeout):
+        return {"ok": False, "reachable": False, "target_count": 0, "bilibili_video_target": False, "url": cdp_url}
+
     def fake_api_check(api_url, timeout):
         return {"ok": True, "reachable": True, "url": api_url, "code": 0}
 
@@ -81,6 +90,7 @@ def test_evaluate_environment_keeps_core_ready_when_optional_tools_are_missing()
         which=fake_which,
         find_spec=fake_find_spec,
         web_check=fake_web_check,
+        edge_check=fake_edge_check,
         api_check=fake_api_check,
         qwen_probe=lambda find_spec: {"ok": False, "python": None},
     )
@@ -88,6 +98,7 @@ def test_evaluate_environment_keeps_core_ready_when_optional_tools_are_missing()
     assert report["capabilities"]["core"]["ok"]
     assert report["capabilities"]["public_subtitles_comments_archive"]["ok"]
     assert not report["capabilities"]["browser_ai_subtitles"]["ok"]
+    assert not report["capabilities"]["edge_browser_ai_subtitles"]["ok"]
     assert not report["capabilities"]["audio_asr_fallback"]["ok"]
     assert not report["capabilities"]["developer_tests"]["ok"]
     assert any("ffmpeg" in item for item in report["recommendations"])
@@ -105,6 +116,7 @@ def test_evaluate_environment_marks_public_route_unavailable_when_bilibili_api_f
         which=lambda name: None,
         find_spec=lambda name: object() if name == "pytest" else None,
         web_check=lambda cdp_url, timeout: {"ok": False, "reachable": False, "target_count": 0, "url": cdp_url},
+        edge_check=lambda cdp_url, timeout: {"ok": False, "reachable": False, "target_count": 0, "bilibili_video_target": False, "url": cdp_url},
         api_check=fake_api_check,
         qwen_probe=lambda find_spec: {"ok": False, "python": None},
     )

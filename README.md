@@ -19,6 +19,7 @@ Bili Note 是一个面向知识库的 B 站视频与图文笔记工具：完整�
 - 质量感知：结合内容热度、互动质量、评论讨论度和发布时间等信号调整笔记预算，让更值得深读的内容获得更充分的整理。
 - 写前定标：先根据原始材料生成推荐字数、压缩比和写作粒度，再开始写笔记；写后评分只用于验收和微调。
 - 字幕密度提醒：长视频如果字幕/转写明显稀疏，会提醒你需要关键帧、OCR 或多模态视觉理解，避免把不完整文本写成完整课程笔记。
+- 关键帧视觉理解：视频每次运行前询问用户是否开启；开启后先用最多 12 帧组成 4×3 联系图，再按需查看单帧，控制视觉输入 tokens。
 
 它的目标不是把内容压成几句摘要，而是生成一份“学完这节课或读完这篇教程之后真的有收获”的学习型笔记。
 
@@ -61,6 +62,7 @@ Bili Note 是一个面向知识库的 B 站视频与图文笔记工具：完整�
 - 完整评论与评论 JSONL
 - 字幕全集和评论全集
 - 字幕证据索引、图文证据索引、评论证据索引、合并证据索引
+- 关键帧联系图、单帧、关键帧清单和视觉证据索引（用户选择开启时）
 - 内容元数据、字幕清单、图文清单、评论清单
 - 笔记预算和评分结果
 
@@ -103,6 +105,8 @@ https://github.com/Rimagination/bili-note
 请帮我提取这个 B 站图文的内容和评论区有用的内容：https://www.bilibili.com/opus/1194341967364882439
 ```
 
+视频每次运行前，Agent 会询问是否开启关键帧视觉理解。选择开启会额外消耗视觉输入 tokens，但能补充 PPT、板书、代码、界面和无字幕片段的信息；选择关闭会继续使用字幕、转写、评论和元数据路线。
+
 ### 3. 指定保存位置
 
 如果你有固定文件夹，或者想保存到 Obsidian 知识库里，再加一句保存路径：
@@ -144,10 +148,11 @@ Bili Note 和 DyNote 会共享可复用资源。默认共享目录是：
 | 层级 | 用来做什么 | 需要什么 | 缺失时怎么办 |
 | --- | --- | --- | --- |
 | 必需 | 启动 skill、抓公开元数据、整理已有材料 | Python 3.10+、已安装本 skill、能访问 B 站公开接口 | 先修复 Python、网络或重新安装 skill |
-| 登录浏览器 | 网页 AI 字幕 | Chrome、`web-access`、当前 Chrome 已登录 B 站并打开视频页 | 没有时跳过网页 AI 字幕，说明覆盖范围 |
+| 登录浏览器 | 网页 AI 字幕 | Chrome + `web-access`，或开启远程调试的 Edge；浏览器中已登录 B 站并打开视频页 | 没有时跳过网页 AI 字幕，说明覆盖范围 |
 | 中文转写 | 中文字幕不可用时做高可读转写 | `ffmpeg`、共享 Qwen3-ASR 环境 | 运行 `scripts/setup_qwen_asr_env.py`，两个 skill 共用 |
 | 外语转写 | 外语视频转写 | `ffmpeg`、Whisper / faster-whisper | 只有外语视频或 Qwen 不适合时再装 |
 | 下载兜底 | B 站公开音频下载失败时兜底 | `yt-dlp` | 需要时再装，不是默认依赖 |
+| 关键帧理解 | 视频画面取样和联系图 | `ffmpeg`、可访问的视频流或 `yt-dlp`、视觉模型 | 关闭关键帧理解，或补装 ffmpeg/yt-dlp |
 | 开发测试 | 跑本项目测试 | `pytest` | 普通使用不需要 |
 
 默认策略：B 站公开视频优先走公开字幕和网页 AI 字幕；确实需要音频转写时，中文或未指定语言的视频优先 Qwen3-ASR，明确是外语视频时优先 Whisper 系后端。需要手动指定时，可以用 `--asr-backend qwen3-asr` 或 `--asr-backend faster-whisper`。
@@ -158,11 +163,25 @@ Bili Note 默认优先用字幕，但长视频的字幕/转写如果明显很少
 
 这时 Bili Note 会在 `metadata/note_budget.json` 里写入画面依赖提示。更合适的做法是先抽取关键帧或截图，再用 OCR 或多模态视觉理解补证。如果当前接入的模型不能看图，Agent 应该明确告诉你：这个高级功能需要视觉模型或人工查看关键帧；当前只能基于字幕、元数据和评论做有限整理。
 
+每次视频运行会先做轻量预检：读取时长、分P和已有字幕，计算字幕密度并给出是否值得看画面的建议；这个阶段不会下载视频。随后仍会强制询问是否开启关键帧理解。预检结果保存在 `visual_preflight.json`，方便复核本次选择依据。
+
+开启关键帧理解后，`scripts/extract_video_keyframes.py` 会在工作目录生成 `keyframes/contact_sheet.png`、最多 12 张单帧和 `keyframes_manifest.json`；归档后清单位于 `metadata/keyframes_manifest.json`。视觉观察写入归档目录的 `metadata/visual_review.md`，并使用 `KF-Pxx-xx` 关键帧证据编号。
+
 ## 登录和隐私
 
-网页 AI 字幕路线只使用 Chrome + `web-access`：让已登录的 B 站页面自己请求字幕接口。Bili Note 不读取、不导出、不保存 Cookie、localStorage、浏览器 profile 或登录 token。
+网页 AI 字幕支持两条路线：Chrome 通过 `web-access`，Edge 通过 Chromium DevTools Protocol 直连。两条路线都让已登录的 B 站页面自己请求字幕接口；Bili Note 不读取、不导出、不保存 Cookie、localStorage、浏览器 profile 或登录 token。
 
-如果没有可用 Chrome 登录态，Bili Note 会跳过网页 AI 字幕，改用公开字幕、图文正文、评论、音频转写或有限材料整理，并明确说明覆盖范围。Edge、Playwright Chromium 和原生浏览器 CDP 端口目前不能直接替代这条路线。
+如果没有可用的浏览器登录态，Bili Note 会跳过网页 AI 字幕，改用公开字幕、图文正文、评论、音频转写或有限材料整理，并明确说明覆盖范围。
+
+Edge 需要用远程调试端口启动一个独立实例，并在该实例中登录 B 站。Windows PowerShell 示例：
+
+```powershell
+$edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+$profile = Join-Path $env:LOCALAPPDATA "bili-note-edge-profile"
+& $edge --remote-debugging-port=9222 --user-data-dir="$profile" "https://www.bilibili.com/"
+```
+
+首次使用时在这个 Edge 实例中完成登录，然后运行总入口并指定 `--browser edge`。脚本默认连接 `http://127.0.0.1:9222`，也可以通过 `--edge-cdp-url` 修改。Edge 路线需要可选 Python 包 `websocket-client`：`python -m pip install websocket-client`。
 
 ## 写笔记的原则
 
@@ -181,9 +200,11 @@ Bili Note 默认优先用字幕，但长视频的字幕/转写如果明显很少
 - `scripts/setup_qwen_asr_env.py`：创建或复用共享 Qwen3-ASR 环境，默认位于 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`。
 - `scripts/run_qwen_asr.py`：调用 Qwen3-ASR-0.6B，可按 chunk 分段避免显存溢出。
 - `scripts/run_bili_note.py`：一键运行视频/图文提取、评论、归档和证据索引流程。
+- `scripts/extract_video_keyframes.py`：下载低清视频流并生成最多 12 张代表帧与联系图。
 - `scripts/extract_bilibili.py`：抓取元数据、字幕、音频、音频转写和评论。
 - `scripts/extract_bilibili_opus.py`：抓取 B 站图文/动态正文、图片、代码块和图文评论。
 - `scripts/fetch_browser_ai_subtitles.py`：通过已登录网页播放器下载 B 站 AI 字幕。
+- `scripts/edge_cdp.py`：连接 Edge 远程调试页面的可选 CDP 适配器。
 - `scripts/archive_bili_materials.py`：归档完整材料，生成全文索引、证据索引和带字幕密度/视觉依赖提示的笔记预算。
 - `scripts/score_bili_note.py`：按预算验收主笔记长度、压缩比、证据引用和视觉依赖提示。
 - `scripts/update_note_budget_section.py`：把预算、互动质量和信噪比评分写回主笔记。

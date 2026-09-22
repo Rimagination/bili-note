@@ -1,8 +1,9 @@
 """Archive Bilibili extraction outputs for long-term knowledge-base use.
 
 Input is an extraction directory created by extract_bilibili.py,
-extract_bilibili_opus.py, and optionally fetch_browser_ai_subtitles.py. The
-script copies raw subtitles/articles/comments into a stable archive and builds
+extract_bilibili_opus.py, extract_video_keyframes.py, and optionally
+fetch_browser_ai_subtitles.py. The script copies raw
+subtitles/articles/comments/keyframes into a stable archive and builds
 retrieval-friendly Markdown and JSONL indexes.
 """
 
@@ -79,6 +80,15 @@ def copy_if_exists(src: Path, dst: Path) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
     return True
+
+
+def safe_relative_path(value: Any) -> Path | None:
+    if not value:
+        return None
+    path = Path(str(value))
+    if path.is_absolute() or ".." in path.parts:
+        return None
+    return path
 
 
 def find_subtitle_manifest(extract_dir: Path) -> Path | None:
@@ -598,6 +608,116 @@ def archive_articles(extract_dir: Path, archive_dir: Path) -> dict[str, Any]:
     return {"available": True, **summary}
 
 
+def archive_keyframes(extract_dir: Path, archive_dir: Path) -> dict[str, Any]:
+    choice_path = extract_dir / "visual_review_choice.json"
+    if choice_path.exists():
+        try:
+            choice = read_json(choice_path)
+        except (OSError, json.JSONDecodeError):
+            choice = {}
+        if isinstance(choice, dict) and choice.get("visual_review") == "off":
+            index_dir = archive_dir / "indexes"
+            index_dir.mkdir(parents=True, exist_ok=True)
+            (index_dir / "关键帧索引.jsonl").write_text("", encoding="utf-8")
+            write_json(
+                archive_dir / "metadata" / "keyframes_manifest.json",
+                {
+                    "status": "disabled",
+                    "visual_review": "off",
+                    "frames_available": False,
+                    "visual_review_completed": False,
+                    "manifest_path": "metadata/keyframes_manifest.json",
+                },
+            )
+            return {
+                "available": False,
+                "frames_available": False,
+                "visual_review_completed": False,
+                "visual_review": "off",
+                "frame_count": 0,
+                "manifest": "metadata/keyframes_manifest.json",
+                "reason": "user disabled keyframe visual review for this run",
+            }
+
+    manifest_path = extract_dir / "keyframes_manifest.json"
+    if not manifest_path.exists():
+        return {"available": False, "reason": "keyframes_manifest.json not found"}
+
+    manifest = read_json(manifest_path)
+    if manifest.get("status") != "ok":
+        return {"available": False, "reason": "keyframe manifest is not ready"}
+
+    sheet = safe_relative_path(manifest.get("sheet"))
+    missing_files: list[str] = []
+    copied_files = 0
+    sheet_copied = bool(sheet and copy_if_exists(extract_dir / sheet, archive_dir / sheet))
+    if not sheet_copied:
+        missing_files.append(str(manifest.get("sheet") or "contact_sheet.png"))
+    readme = safe_relative_path("keyframes/README.md")
+    if readme and copy_if_exists(extract_dir / readme, archive_dir / readme):
+        copied_files += 1
+
+    evidence_records = []
+    for item in manifest.get("frames") or []:
+        if not isinstance(item, dict):
+            missing_files.append("invalid frame record")
+            continue
+        relative = safe_relative_path(item.get("file"))
+        if not relative or not copy_if_exists(extract_dir / relative, archive_dir / relative):
+            missing_files.append(str(item.get("file") or "unknown frame"))
+            continue
+        copied_files += 1
+        evidence_records.append(
+            {
+                "type": "visual_keyframe",
+                "evidence_id": item.get("evidence_id"),
+                "page": item.get("page"),
+                "cid": item.get("cid"),
+                "part": item.get("part"),
+                "timestamp_seconds": item.get("timestamp_seconds"),
+                "timestamp": item.get("timestamp"),
+                "sheet_cell": item.get("sheet_cell"),
+                "image": item.get("file"),
+                "text": "关键帧画面，需由视觉复核补充观察结果。",
+            }
+        )
+    if sheet_copied:
+        copied_files += 1
+
+    manifest_frames = manifest.get("frames") or []
+    if manifest.get("frame_count") != len(manifest_frames):
+        missing_files.append("frame_count 不匹配")
+    frames_available = bool(evidence_records) and len(evidence_records) == len(manifest_frames) and not missing_files
+    visual_review_path = archive_dir / "metadata" / "visual_review.md"
+    visual_review_completed = visual_review_path.exists() and visual_review_path.stat().st_size > 0
+    archive_manifest = dict(manifest)
+    archive_manifest["manifest_path"] = "metadata/keyframes_manifest.json"
+    archive_manifest["frames_available"] = frames_available
+    archive_manifest["visual_review_completed"] = visual_review_completed
+    write_json(archive_dir / "metadata" / "keyframes_manifest.json", archive_manifest)
+
+    index_dir = archive_dir / "indexes"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    (index_dir / "关键帧索引.jsonl").write_text(
+        "\n".join(jsonl_line(record) for record in evidence_records) + ("\n" if evidence_records else ""),
+        encoding="utf-8",
+    )
+    result = {
+        "available": frames_available and sheet_copied,
+        "frames_available": frames_available,
+        "visual_review_completed": visual_review_completed,
+        "frame_count": len(evidence_records),
+        "copied_files": copied_files,
+        "sheet": manifest.get("sheet"),
+        "manifest": "metadata/keyframes_manifest.json",
+        "evidence_blocks": len(evidence_records),
+    }
+    if missing_files:
+        result["missing_files"] = missing_files
+        result["reason"] = "关键帧文件不完整，已保留可用文件并等待重新归档"
+    return result
+
+
 def combine_evidence_indexes(archive_dir: Path) -> int:
     index_dir = archive_dir / "indexes"
     index_dir.mkdir(parents=True, exist_ok=True)
@@ -605,6 +725,7 @@ def combine_evidence_indexes(archive_dir: Path) -> int:
         index_dir / "字幕证据索引.jsonl",
         index_dir / "图文证据索引.jsonl",
         index_dir / "评论证据索引.jsonl",
+        index_dir / "关键帧索引.jsonl",
     ]
     lines: list[str] = []
     for source in sources:
@@ -785,8 +906,10 @@ def write_note_budget(
     comment_info: dict[str, Any],
     evidence_count: int,
     article_info: dict[str, Any] | None = None,
+    keyframe_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     article_info = article_info or {}
+    keyframe_info = keyframe_info or {"available": False, "reason": "keyframe visual review not enabled"}
     has_article = bool(article_info.get("available"))
     duration_minutes = float(subtitle_info.get("duration_minutes") or 0)
     subtitle_chars = int(subtitle_info.get("subtitle_chars") or 0)
@@ -872,6 +995,7 @@ def write_note_budget(
         "subtitle_chars": subtitle_chars,
         "subtitle_chars_per_minute": subtitle_chars_per_minute,
         "visual_dependency": visual_dependency,
+        "visual_review": keyframe_info,
         "evidence_warnings": visual_dependency.get("warnings") or [],
         "subtitle_evidence_blocks": evidence_blocks,
         "comment_records": comment_records,
@@ -896,7 +1020,16 @@ def write_note_budget(
 
 def archive_metadata(extract_dir: Path, archive_dir: Path) -> dict[str, bool]:
     copied: dict[str, bool] = {}
-    for name in ("metadata.json", "source.md", "run_summary.json", "subtitle_probe.json", "opus_raw.json", "opus_normalized.json"):
+    for name in (
+        "metadata.json",
+        "source.md",
+        "run_summary.json",
+        "subtitle_probe.json",
+        "visual_preflight.json",
+        "visual_review_choice.json",
+        "opus_raw.json",
+        "opus_normalized.json",
+    ):
         copied[name] = copy_if_exists(extract_dir / name, archive_dir / "metadata" / name)
     return copied
 
@@ -959,9 +1092,13 @@ def summarize_articles_for_readme(article_info: dict[str, Any]) -> str:
 
 def summarize_metadata_for_readme(metadata_info: dict[str, bool]) -> str:
     copied = [name for name, ok in metadata_info.items() if ok]
-    missing = [name for name, ok in metadata_info.items() if not ok]
-    if copied and not missing:
+    core_names = ("metadata.json", "source.md", "run_summary.json", "subtitle_probe.json")
+    missing_core = [name for name in core_names if not metadata_info.get(name)]
+    if not missing_core and metadata_info.get("visual_preflight.json"):
+        return "元数据、来源说明、运行摘要、字幕探测和轻量视觉预检均已归档。"
+    if not missing_core:
         return "元数据、来源说明、运行摘要和字幕探测记录均已归档。"
+    missing = [name for name, ok in metadata_info.items() if not ok]
     if copied:
         return f"已归档：{', '.join(copied)}；缺少：{', '.join(missing) or '无'}。"
     return "未找到可归档的元数据文件。"
@@ -1004,7 +1141,9 @@ def write_readme(
     comment_info: dict[str, Any],
     metadata_info: dict[str, bool],
     note_budget: dict[str, Any],
+    keyframe_info: dict[str, Any] | None = None,
 ) -> None:
+    keyframe_info = keyframe_info or {"available": False, "reason": "keyframe visual review not enabled"}
     is_opus = bool(article_info.get("available"))
     lines = [
         "# B站材料包",
@@ -1025,6 +1164,17 @@ def write_readme(
         f"- 评论：{summarize_comments_for_readme(comment_info)}",
         f"- 元数据：{summarize_metadata_for_readme(metadata_info)}",
         f"- 笔记预算：{summarize_budget_for_readme(note_budget)}",
+        (
+            f"- 关键帧：已归档 {fmt_readme_number(keyframe_info.get('frame_count'))} 张，"
+            f"联系图见 `{keyframe_info.get('sheet')}`，视觉证据索引见 `indexes/关键帧索引.jsonl`；"
+            + (
+                "已完成视觉观察。"
+                if keyframe_info.get("visual_review_completed")
+                else "视觉观察待写入 `metadata/visual_review.md`。"
+            )
+            if keyframe_info.get("available")
+            else f"- 关键帧：未启用或不完整（{keyframe_info.get('reason', '未生成')}）。"
+        ),
         "",
         "## 文件说明",
         "",
@@ -1046,15 +1196,19 @@ def write_readme(
         "- `indexes/字幕证据索引.jsonl`：字幕证据块的机器可读版本。",
         "- `indexes/评论全集.jsonl`：逐评论/回复索引。",
         "- `indexes/评论证据索引.jsonl`：评论证据块。",
+        "- `keyframes/contact_sheet.png`：关键帧联系图，先看这一张可以节省视觉输入。",
+        "- `keyframes/frames/`：关键帧单图；联系图中看不清时按 `metadata/keyframes_manifest.json` 定向打开。",
+        "- `indexes/关键帧索引.jsonl`：关键帧时间点和图片路径；视觉复核后补充观察结果。",
         "- `indexes/证据索引.jsonl`：图文/字幕证据和评论证据的合并索引。",
         "- `metadata/metadata.json`：B站内容元数据，包括标题、UP、发布时间和互动数据。",
+        "- `metadata/visual_preflight.json`：询问关键帧理解前的时长、字幕密度和画面依赖建议。",
         "- `metadata/note_budget.json`：根据正文/字幕量、证据量和互动质量生成的推荐笔记长度。",
         "- `metadata/note_score.json`：最终笔记与推荐长度的对比结果；如果还没有生成，可忽略。",
         "",
         "## 推荐用法",
         "",
         "1. 先读知识库里的最终笔记，快速了解结论。",
-        "2. 对某个判断不放心时，用笔记里的 `O图文证据ID`、`Pxx@时间段` 或 `C评论ID` 回到 `indexes/证据索引.jsonl` 查原文。",
+        "2. 对某个判断不放心时，用笔记里的 `O图文证据ID`、`Pxx@时间段`、`KF-Pxx-xx` 或 `C评论ID` 回到 `indexes/证据索引.jsonl` 查原文。",
         "3. 需要更细的追问时，把 `indexes/图文全集.jsonl`、`indexes/字幕全集.jsonl` 和 `indexes/评论全集.jsonl` 当作问答材料。",
         "4. 重新写笔记前先看 `metadata/note_budget.json`：长视频、长图文、高互动内容应该保留更多结构和证据，短内容则避免过度扩写。",
         "",
@@ -1076,9 +1230,17 @@ def main() -> int:
     subtitle_info = archive_subtitles(extract_dir, archive_dir)
     article_info = archive_articles(extract_dir, archive_dir)
     comment_info = archive_comments(extract_dir, archive_dir)
+    keyframe_info = archive_keyframes(extract_dir, archive_dir)
     evidence_count = combine_evidence_indexes(archive_dir)
-    note_budget = write_note_budget(archive_dir, subtitle_info, comment_info, evidence_count, article_info)
-    write_readme(archive_dir, subtitle_info, article_info, comment_info, metadata_info, note_budget)
+    note_budget = write_note_budget(
+        archive_dir,
+        subtitle_info,
+        comment_info,
+        evidence_count,
+        article_info,
+        keyframe_info,
+    )
+    write_readme(archive_dir, subtitle_info, article_info, comment_info, metadata_info, note_budget, keyframe_info)
 
     print(
         json.dumps(
@@ -1087,6 +1249,7 @@ def main() -> int:
                 "subtitles": subtitle_info,
                 "article": article_info,
                 "comments": comment_info,
+                "keyframes": keyframe_info,
                 "evidence_blocks": evidence_count,
                 "note_budget": note_budget,
             },

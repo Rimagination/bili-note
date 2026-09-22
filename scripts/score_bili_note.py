@@ -23,12 +23,43 @@ def visible_text_chars(markdown: str) -> int:
     return len(text)
 
 
-def count_evidence_refs(markdown: str) -> int:
+def safe_relative_path(value: Any) -> Path | None:
+    if not value:
+        return None
+    path = Path(str(value))
+    if path.is_absolute() or ".." in path.parts:
+        return None
+    return path
+
+
+def valid_keyframe_ids(archive_dir: Path) -> set[str]:
+    index_path = archive_dir / "indexes" / "关键帧索引.jsonl"
+    if not index_path.exists():
+        return set()
+    valid: set[str] = set()
+    for line in index_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        evidence_id = record.get("evidence_id")
+        image = safe_relative_path(record.get("image"))
+        if evidence_id and image and (archive_dir / image).is_file():
+            valid.add(str(evidence_id))
+    return valid
+
+
+def count_evidence_refs(markdown: str, valid_keyframe_ids: set[str] | None = None) -> int:
     """Count evidence ids, including ids that appear inside numbered reference links."""
     opus_refs = re.findall(r"\bO\d+-E\d{3}\b", markdown)
     subtitle_refs = re.findall(r"P\d{2}@\d{2}:\d{2}:\d{2}-\d{2}:\d{2}:\d{2}", markdown)
     comment_refs = re.findall(r"\bC\d{6,}\b", markdown)
-    return len(set(opus_refs)) + len(set(subtitle_refs)) + len(set(comment_refs))
+    keyframe_refs = re.findall(r"\bKF-P\d{2}-\d{2}\b", markdown)
+    if valid_keyframe_ids is not None:
+        keyframe_refs = [ref for ref in keyframe_refs if ref in valid_keyframe_ids]
+    return len(set(opus_refs)) + len(set(subtitle_refs)) + len(set(comment_refs)) + len(set(keyframe_refs))
 
 
 def status_for(actual: int, low: int, high: int) -> str:
@@ -51,7 +82,7 @@ def score_note(archive_dir: Path, note_path: Path) -> dict[str, Any]:
     duration_minutes = float(budget.get("duration_minutes") or 0)
     reading_minutes = float(budget.get("reading_minutes_estimate") or 0)
     evidence_total = int(budget.get("all_evidence_blocks") or 0)
-    evidence_refs = count_evidence_refs(note)
+    evidence_refs = count_evidence_refs(note, valid_keyframe_ids(archive_dir))
     return {
         "note_path": str(note_path),
         "archive_dir": str(archive_dir),
@@ -70,6 +101,7 @@ def score_note(archive_dir: Path, note_path: Path) -> dict[str, Any]:
         "note_chars_per_reading_minute": round(actual_chars / reading_minutes, 3) if reading_minutes else None,
         "subtitle_chars_per_minute": budget.get("subtitle_chars_per_minute"),
         "visual_dependency": budget.get("visual_dependency"),
+        "visual_review": budget.get("visual_review"),
         "evidence_warnings": budget.get("evidence_warnings"),
         "evidence_refs_in_note": evidence_refs,
         "all_evidence_blocks": evidence_total,

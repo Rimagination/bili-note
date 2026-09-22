@@ -9,7 +9,7 @@ description: Extract Bilibili videos and opus/article posts into readable Markdo
 
 联网或登录态操作必须先使用 `web-access`。
 
-网页 AI 字幕当前只支持 Chrome + `web-access` 路线：让已登录的 B站页面自己请求字幕接口。不要把 Edge、Playwright 临时浏览器或原生 CDP 端口当成等价替代，除非脚本已经明确支持。
+网页 AI 字幕支持两条路线：Chrome 使用 `web-access`，Edge 使用开启远程调试的 Chromium DevTools Protocol 直连。两条路线都让已登录的 B站页面自己请求字幕接口，不读取或复制 Cookie/profile。Playwright 临时浏览器不属于受支持路线。
 
 Bili Note 与 DyNote 共享可复用本地资源。默认共享目录是 `%USERPROFILE%\.cache\rimagination-notes`，Qwen3-ASR 环境默认是 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`。如果任一 skill 已经安装过 Qwen3-ASR，另一个 skill 必须优先复用，不要重复安装。Hugging Face、Whisper 和 faster-whisper 缓存按本机通用缓存复用。
 
@@ -17,10 +17,17 @@ Bili Note 与 DyNote 共享可复用本地资源。默认共享目录是 `%USERP
 
 B 站视频优先拿字幕，但字幕/转写不等于完整理解。长视频如果字幕字数明显偏少，可能说明核心信息在画面、PPT、板书、代码演示、屏幕操作或无解说片段中。
 
+- 每次视频运行都必须先做轻量预检，再询问用户是否开启“关键帧视觉理解”。预检只读取元数据、分P信息和已有字幕文件，不下载视频；它会显示时长、字幕字数、字幕密度和画面依赖建议。收到明确的 `on` 或 `off` 后才能进入后续流程。询问时说明：`on` 会抽取最多 12 帧，先合成为一张 4×3 联系图，再按需要打开单帧，视觉输入会增加 tokens；`off` 只走字幕、转写、评论和元数据路线，节省视觉输入 tokens。
+- 用户选择 `on` 时，给 `run_bili_note.py` 传 `--visual-review on`；选择 `off` 时传 `--visual-review off`。脚本默认 `--visual-review ask`，直接在终端运行也会在轻量预检后停下来等待选择。
+- 关键帧理解选择只对视频运行生效。图文/动态已有图片材料，按图文视觉理解流程处理。
 - 归档后必须读取 `metadata/note_budget.json`。如果 `visual_dependency.needs_visual_review=true`，不要把稀疏字幕写成完整学习笔记。
 - 这种情况下，先采用更合适的技术：抽取代表性关键帧或截图，再做 OCR 或多模态视觉理解；必要时重新抓网页 AI 字幕或补本地自动语音识别。
 - 如果当前接入的模型或工具不能看图，必须告诉用户：关键帧理解属于高级视觉能力，需要多模态模型、OCR 工具或人工查看；当前只能基于字幕/元数据生成有限笔记并标注覆盖范围。
 - 最终笔记和用户回复要转述 `visual_dependency.warnings`，并说明是否已经补了视觉证据。
+
+关键帧视觉理解采用低成本的两阶段读取：先看一张 4×3 联系图建立全片画面地图；联系图中出现文字、代码、图表或界面细节时，再依据工作目录的 `keyframes_manifest.json` 打开对应单帧。归档后对应路径是 `archive_dir/metadata/keyframes_manifest.json`。不要默认把 12 张完整图片全部送入模型。
+
+选择 `on` 后，先查看 `keyframes/contact_sheet.png`，再结合 `keyframes/README.md` 和工作目录的 `keyframes_manifest.json` 定位时间点。把视觉观察写入材料包的 `metadata/visual_review.md`，每条关联 `KF-Pxx-xx`、分P、时间和观察结论；不确定的画面标记为待核实。关键帧证据可通过 `indexes/关键帧索引.jsonl` 和总证据索引回查。
 
 ## 依赖与环境检查
 
@@ -38,26 +45,29 @@ $py = "python"
 
 - `public_subtitles_comments_archive=OK`：优先走默认字幕/图文、评论和归档流程。
 - `browser_ai_subtitles=OK`：当公开接口只有 `ai-zh` 且 `subtitle_url` 为空时，走 Chrome + `web-access` 网页 AI 字幕。
+- `edge_browser_ai_subtitles=OK`：需要 Edge 远程调试端口和 `websocket-client`，总入口加 `--browser edge`。
 - `audio_asr_fallback=OK`：只有字幕和网页 AI 字幕都不可得、且用户确实需要完整转写时，才走音频转写。中文或未指定语言优先共享 Qwen3-ASR；明确外语视频优先 Whisper 系后端。
 - 某个增强能力缺失时，只说明该路线暂不可用；不要把它说成整个 skill 不可用。
-- 网页登录态只通过 `web-access` 已授权的 Chrome 页面使用；不要读取或复制 Cookie/profile，不要强制结束用户浏览器进程。没有 Chrome + `web-access` 时就跳过网页 AI 字幕并说明覆盖范围。
+- 网页登录态只通过已授权的 Chrome `web-access` 页面或 Edge 远程调试页面使用；不要读取或复制 Cookie/profile，不要强制结束用户浏览器进程。两种浏览器路线都不可用时就跳过网页 AI 字幕并说明覆盖范围。
 
 ## 默认流程
 
 1. 读清用户要什么：视频或图文链接、是否要评论区、保存路径、是否需要全文材料或只要提炼。
 2. 如果是首次使用、依赖状态不明、字幕抓取失败或用户要求音频转写，先用 `check_environment.py` 判断当前可走路线。
-3. 优先用 `run_bili_note.py` 一键完成可自动化部分。它会自动识别 `/video/BV...`、`/opus/...`、`/dynamic/...` 或纯 opus id。
-4. 如果是图文/动态，走 `extract_bilibili_opus.py` 路线：抓正文、标题、作者、发布时间、图片、代码块、图文证据索引；用户加 `--comments` 时抓图文评论。
-5. 如果是视频，优先下载字幕：
+3. 如果是视频，先让总入口完成轻量预检；它只抓元数据和字幕，不下载视频。根据预检结果向用户说明建议，并完成关键帧视觉理解询问；用户选择后把 `--visual-review on` 或 `--visual-review off` 传给总入口。
+4. 优先用 `run_bili_note.py` 一键完成可自动化部分。它会自动识别 `/video/BV...`、`/opus/...`、`/dynamic/...` 或纯 opus id。
+5. 如果是图文/动态，走 `extract_bilibili_opus.py` 路线：抓正文、标题、作者、发布时间、图片、代码块、图文证据索引；用户加 `--comments` 时抓图文评论。
+6. 如果是视频，优先下载字幕：
    - 普通字幕 URL 可用时，直接用 `--download-subtitles`。
    - 如果普通接口显示 `ai-zh` 但 `subtitle_url` 为空，不要说“没有字幕”；改走“网页 AI 字幕”流程。
    - 如果字幕仍不可得，再按需要下载音频并用本地自动语音识别转写。中文优先 Qwen3-ASR，明确外语优先 Whisper 系后端。
-6. 用户要求评论区时，用 `--comments` 抓取主评论和子评论；写入笔记时过滤打卡、求资料、广告、闲聊等技术无关内容。
-7. 归档原始材料：把完整字幕或图文正文、图片、完整评论、元数据和 JSONL 索引存到知识库旁边的长期目录。
-8. 写前定标：必须先读取 `metadata/note_budget.json`，把推荐字数区间、压缩比目标、写作粒度、互动质量倍率、证据块数量和 `visual_dependency` 作为本次笔记的写作目标。视频按时长、字幕字数、证据块、评论量和互动质量定标；图文按正文长度、图片/代码/证据块、评论量和互动质量定标。
+7. 用户要求评论区时，用 `--comments` 抓取主评论和子评论；写入笔记时过滤打卡、求资料、广告、闲聊等技术无关内容。
+8. 归档原始材料：把完整字幕或图文正文、图片、完整评论、元数据和 JSONL 索引存到知识库旁边的长期目录。
+9. 用户选择 `on` 时，在写前定标前查看 `keyframes/contact_sheet.png`，必要时查看对应单帧，并保存 `metadata/visual_review.md`。
+10. 写前定标：必须先读取 `metadata/note_budget.json`，把推荐字数区间、压缩比目标、写作粒度、互动质量倍率、证据块数量和 `visual_dependency` 作为本次笔记的写作目标。视频按时长、字幕字数、证据块、评论量和互动质量定标；图文按正文长度、图片/代码/证据块、评论量和互动质量定标。
    - 如果 `visual_dependency.risk` 是 `medium` 或 `high`，先补关键帧/OCR/多模态视觉理解，或明确告诉用户当前缺少视觉理解能力，不能写成完整解析。
-9. 按预算写 Markdown：默认写成“学习型笔记”，目标是让人或 Agent 像学完一节课或读完一篇教程一样获得概念、方法、判断标准、实践步骤和自测题；根据预算决定详略，不要把长课和短视频写成差不多字数。来源、覆盖范围和归档路径放到后半部分。正文证据默认用论文式编号 `[1][2]`，不直接堆长证据 ID。
-10. 写后验收：用 `score_bili_note.py` 校验笔记字数、压缩比、每分钟/每篇笔记密度和证据引用比例。评分只做 QA 和微调，不代替写前定标；太短时优先补“学习收获、知识地图、概念卡、实战流程、坑点、自测题”，不要只堆分P摘要或段落摘要。
+11. 按预算写 Markdown：默认写成“学习型笔记”，目标是让人或 Agent 像学完一节课或读完一篇教程一样获得概念、方法、判断标准、实践步骤和自测题；根据预算决定详略，不要把长课和短视频写成差不多字数。来源、覆盖范围和归档路径放到后半部分。正文证据默认用论文式编号 `[1][2]`，不直接堆长证据 ID。
+12. 写后验收：用 `score_bili_note.py` 校验笔记字数、压缩比、每分钟/每篇笔记密度和证据引用比例。评分只做 QA 和微调，不代替写前定标；太短时优先补“学习收获、知识地图、概念卡、实战流程、坑点、自测题”，不要只堆分P摘要或段落摘要。
 
 ## 常用命令
 
@@ -88,8 +98,11 @@ $py = "python"
 & $py "$skill\scripts\run_bili_note.py" "https://www.bilibili.com/video/BVxxxx/" `
   --work-dir ".\tmp_bili_extract" `
   --archive-dir "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx_视频短标题" `
+  --visual-review on `
   --comments
 ```
+
+如果用户选择关闭，把上面的 `--visual-review on` 改为 `--visual-review off`。每次视频运行都重新询问，不能沿用上一次选择。
 
 图文/动态也用同一个入口：
 
@@ -106,7 +119,7 @@ $py = "python"
 --no-download-images
 ```
 
-如果普通接口没有字幕，但网页播放器能拿到 AI 字幕，先用 `web-access` 打开已登录 Chrome 里的视频页并取得 target id，然后加：
+如果普通接口没有字幕，但网页播放器能拿到 AI 字幕，Chrome 先用 `web-access` 打开已登录页面并取得 target id，然后加：
 
 ```powershell
 --browser-target "CDP_TARGET_ID"
@@ -115,10 +128,16 @@ $py = "python"
 运行后先看：
 
 - `bili_note_run_report.md`：本次跑了什么、跳过了什么、下一步读哪里。
+- `visual_preflight.json`：询问前的时长、字幕密度、风险和建议，方便复核本次选择依据。
+- `keyframes/contact_sheet.png`：开启关键帧视觉理解时生成的 4×3 联系图。
+- `keyframes_manifest.json`：工作目录中的关键帧编号、分P、时间和单帧路径。
+- `archive_dir/metadata/keyframes_manifest.json`：归档后的关键帧清单。
+- `archive_dir/metadata/visual_review.md`：视觉模型对关键帧的观察结果，由 Agent 在理解后写入。
 - `archive_dir/indexes/证据索引.jsonl`：写总结时可引用的图文/字幕/评论证据块。
 - `archive_dir/indexes/图文全集.md`：完整图文正文合集。
 - `archive_dir/indexes/字幕全集.md`：完整字幕合集。
 - `archive_dir/metadata/note_budget.json`：推荐笔记字数、压缩比、写作粒度和字幕稀疏时的画面依赖提示。
+- `archive_dir/metadata/visual_preflight.json`：归档后的关键帧选择预检记录。
 
 ### 2. 抓元数据和分P目录
 
@@ -134,7 +153,9 @@ $py = "python"
 
 ### 4. 下载网页 AI 字幕
 
-当 `subtitle_probe.json` 里有 `ai-zh`，但 `subtitle_url` 为空时，使用这条路线。当前脚本需要 Chrome + `web-access` 的 `/targets` 和 `/eval` 代理接口；原生 Edge/Chrome DevTools 端口不能直接传给这个脚本。
+当 `subtitle_probe.json` 里有 `ai-zh`，但 `subtitle_url` 为空时，使用这条路线。Chrome 需要 `web-access` 的 `/targets` 和 `/eval` 代理接口；Edge 使用直接 CDP 路线。
+
+Chrome 路线：
 
 1. 用 `web-access` 打开已登录 Chrome 中的 B站视频页，确认页面已加载。
 2. 查看浏览器 target id：
@@ -147,6 +168,28 @@ curl.exe -s http://localhost:3456/targets
 
 ```powershell
 & $py "$skill\scripts\fetch_browser_ai_subtitles.py" --target "CDP_TARGET_ID" --out ".\tmp_bili_extract"
+```
+
+Edge 路线：
+
+1. 用 `--remote-debugging-port=9222` 启动 Edge 独立实例，在其中登录 B 站并打开视频页。
+2. 安装可选依赖：`python -m pip install websocket-client`。
+3. 运行总入口：
+
+```powershell
+& $py "$skill\scripts\run_bili_note.py" "BVxxxx" `
+  --work-dir ".\tmp_bili_extract" `
+  --browser edge `
+  --subtitle-mode browser
+```
+
+也可以直接运行字幕脚本；它会优先选择 Edge 中 URL 包含 `bilibili.com` 的页面：
+
+```powershell
+& $py "$skill\scripts\fetch_browser_ai_subtitles.py" `
+  --browser edge `
+  --edge-cdp-url "http://127.0.0.1:9222" `
+  --out ".\tmp_bili_extract"
 ```
 
 输出包括：
@@ -339,6 +382,8 @@ Get-Content -Encoding UTF8 "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx
 - `scripts/extract_bilibili.py`：元数据、字幕探测、普通字幕、音频、音频转写、评论抓取。
 - `scripts/extract_bilibili_opus.py`：B站图文/动态正文、图片、代码块和图文评论抓取。
 - `scripts/fetch_browser_ai_subtitles.py`：通过已登录网页播放器下载 B站 AI 字幕。
+- `scripts/edge_cdp.py`：连接 Edge 远程调试页面的可选 CDP 适配器。
+- `scripts/extract_video_keyframes.py`：按分P时长抽取最多 12 张代表帧，生成 4×3 联系图和关键帧清单。
 - `scripts/archive_bili_materials.py`：归档完整材料，生成全文索引、证据索引和带字幕密度/视觉依赖提示的笔记预算。
 - `scripts/score_bili_note.py`：按 `metadata/note_budget.json` 验收最终笔记的长度、压缩比、证据引用和视觉依赖提示。
 - `scripts/update_note_budget_section.py`：把预算、互动质量和信噪比评分写回 Markdown 笔记。

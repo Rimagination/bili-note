@@ -1,4 +1,4 @@
 interface:
   display_name: "Bili Note"
   short_description: "把 B站视频和图文转成学习型知识笔记。"
-  default_prompt: "Use $bili-note to extract a Bilibili video or opus/article post, archive full subtitles or article content, images, useful comments, and evidence indexes, then save a learning-oriented Markdown note with concepts, workflows, pitfalls, practice checklists, and self-test questions."
+  default_prompt: "Use $bili-note to extract a Bilibili video or opus/article post, archive full subtitles or article content, images, useful comments, and evidence indexes, then save a learning-oriented Markdown note with concepts, workflows, pitfalls, practice checklists, and self-test questions. Before every video run, perform a lightweight metadata and subtitle preflight, show the visual dependency recommendation, ask whether to enable keyframe visual review, and when enabled inspect the contact sheet first and open only needed individual frames."

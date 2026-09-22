@@ -71,6 +71,15 @@ def test_score_note_against_budget(tmp_path):
     assert result["visual_dependency"]["risk"] == "low"
 
 
+def test_count_evidence_refs_includes_keyframes():
+    module = load_module()
+
+    markdown = "画面证据 KF-P01-01、KF-P01-01 和 KF-P02-03。"
+
+    assert module.count_evidence_refs(markdown) == 2
+    assert module.count_evidence_refs(markdown, {"KF-P01-01"}) == 1
+
+
 def test_score_note_counts_opus_evidence_and_content_chars(tmp_path):
     module = load_module()
     archive_dir = tmp_path / "archive"
@@ -178,6 +187,7 @@ def test_update_note_budget_section_writes_markdown_and_score(tmp_path):
                     "warnings": ["视频时长较长但原始字幕/转写文本明显很少。"],
                 },
                 "evidence_warnings": ["视频时长较长但原始字幕/转写文本明显很少。"],
+                "visual_review": {"available": True, "visual_review_completed": True, "frame_count": 12},
             },
             ensure_ascii=False,
         ),
@@ -192,6 +202,7 @@ def test_update_note_budget_section_writes_markdown_and_score(tmp_path):
     assert "质量倍率 1.100" in text
     assert "画面依赖提示" in text
     assert "高级补证" in text
+    assert "关键帧视觉证据" in text
     assert (archive_dir / "metadata" / "note_score.json").exists()
     assert score["quality_multiplier"] == 1.1
 

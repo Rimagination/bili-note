@@ -990,7 +990,7 @@ def main() -> int:
     args = parser.parse_args()
 
     bvid = extract_bvid(args.source)
-    out_dir = Path(args.out)
+    out_dir = Path(args.out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     view = api_get("/x/web-interface/view", {"bvid": bvid}, bvid)

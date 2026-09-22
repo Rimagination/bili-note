@@ -197,6 +197,88 @@ def test_sparse_video_subtitles_warn_visual_dependency(tmp_path):
     assert "画面依赖提示" in readme
 
 
+def test_archive_keyframes_copies_images_and_adds_visual_evidence(tmp_path):
+    module = load_module()
+    extract_dir = tmp_path / "extract"
+    archive_dir = tmp_path / "archive"
+    (extract_dir / "keyframes" / "frames").mkdir(parents=True)
+    (extract_dir / "keyframes" / "contact_sheet.png").write_bytes(b"sheet")
+    (extract_dir / "keyframes" / "frames" / "frame_001.png").write_bytes(b"frame")
+    (extract_dir / "keyframes" / "README.md").write_text("# keyframes\n", encoding="utf-8")
+    write_json(
+        extract_dir / "keyframes_manifest.json",
+            {
+                "status": "ok",
+                "frame_count": 1,
+                "sheet": "keyframes/contact_sheet.png",
+            "frames": [
+                {
+                    "evidence_id": "KF-P01-01",
+                    "page": 1,
+                    "cid": 123,
+                    "part": "测试",
+                    "timestamp_seconds": 5,
+                    "timestamp": "00:00:05",
+                    "sheet_cell": {"row": 1, "column": 1},
+                    "file": "keyframes/frames/frame_001.png",
+                }
+            ],
+        },
+    )
+
+    info = module.archive_keyframes(extract_dir, archive_dir)
+    combined = module.combine_evidence_indexes(archive_dir)
+
+    assert info["available"] is True
+    assert info["frames_available"] is True
+    assert info["visual_review_completed"] is False
+    assert info["frame_count"] == 1
+    assert (archive_dir / "keyframes" / "contact_sheet.png").exists()
+    assert (archive_dir / "metadata" / "keyframes_manifest.json").exists()
+    assert (archive_dir / "indexes" / "关键帧索引.jsonl").read_text(encoding="utf-8").count("KF-P01-01") == 1
+    assert combined == 1
+
+
+def test_archive_keyframes_reports_incomplete_assets(tmp_path):
+    module = load_module()
+    extract_dir = tmp_path / "extract"
+    archive_dir = tmp_path / "archive"
+    (extract_dir / "keyframes").mkdir(parents=True)
+    (extract_dir / "keyframes" / "contact_sheet.png").write_bytes(b"sheet")
+    write_json(
+        extract_dir / "keyframes_manifest.json",
+        {
+            "status": "ok",
+            "frame_count": 1,
+            "sheet": "keyframes/contact_sheet.png",
+            "frames": [{"evidence_id": "KF-P01-01", "file": "keyframes/frames/missing.png"}],
+        },
+    )
+
+    info = module.archive_keyframes(extract_dir, archive_dir)
+
+    assert info["available"] is False
+    assert info["frames_available"] is False
+    assert info["missing_files"] == ["keyframes/frames/missing.png"]
+
+
+def test_archive_keyframes_clears_current_visual_index_when_disabled(tmp_path):
+    module = load_module()
+    extract_dir = tmp_path / "extract"
+    archive_dir = tmp_path / "archive"
+    write_json(extract_dir / "visual_review_choice.json", {"visual_review": "off"})
+    (archive_dir / "indexes").mkdir(parents=True)
+    (archive_dir / "indexes" / "关键帧索引.jsonl").write_text('{"evidence_id":"KF-P01-01"}\n', encoding="utf-8")
+
+    info = module.archive_keyframes(extract_dir, archive_dir)
+
+    assert info["available"] is False
+    assert info["visual_review"] == "off"
+    assert (archive_dir / "indexes" / "关键帧索引.jsonl").read_text(encoding="utf-8") == ""
+    manifest = json.loads((archive_dir / "metadata" / "keyframes_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "disabled"
+
+
 def test_archive_subtitles_falls_back_to_existing_clean_manifest(tmp_path):
     module = load_module()
     extract_dir = tmp_path / "extract"
