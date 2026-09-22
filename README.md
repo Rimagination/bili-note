@@ -111,6 +111,8 @@ https://github.com/Rimagination/bili-note
 帮我存放在：“D:\知识库\B站总结” 里
 ```
 
+路径按你的平台填写，例如 macOS / Linux 写成 `~/knowledge/知识库/B站总结`。
+
 ## 依赖与环境检测
 
 第一次使用、换机器、字幕路线失败，或准备转写音频前，先让 Agent 检查环境：
@@ -125,17 +127,14 @@ Agent 会运行：
 python scripts/check_environment.py
 ```
 
-Bili Note 和 DyNote 会共享可复用资源。默认共享目录是：
+Bili Note 和 DyNote 会共享可复用资源。默认共享目录按平台：
 
 ```text
-%USERPROFILE%\.cache\rimagination-notes
+Windows:        %USERPROFILE%\.cache\rimagination-notes
+macOS / Linux:  ~/.cache/rimagination-notes
 ```
 
-其中 Qwen3-ASR 虚拟环境默认放在：
-
-```text
-%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv
-```
+其中 Qwen3-ASR 虚拟环境默认放在其下的 `qwen3-asr-venv`：Windows 为 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`，macOS / Linux 为 `~/.cache/rimagination-notes/qwen3-asr-venv`。
 
 因此，只要任意一个 skill 已经引导你安装过 Qwen3-ASR，另一个 skill 会优先复用同一套环境和模型缓存。Hugging Face 模型缓存、Whisper 缓存和 faster-whisper 缓存也按本机通用缓存复用，不会绑定到某一个 skill。
 
@@ -178,7 +177,7 @@ Bili Note 默认优先用字幕，但长视频的字幕/转写如果明显很少
 
 - `SKILL.md`：Codex 使用这个 skill 时读取的完整工作流说明。
 - `scripts/check_environment.py`：检查核心工作流、B 站公开接口、网页 AI 字幕、音频转写和测试依赖是否可用。
-- `scripts/setup_qwen_asr_env.py`：创建或复用共享 Qwen3-ASR 环境，默认位于 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`。
+- `scripts/setup_qwen_asr_env.py`：创建或复用共享 Qwen3-ASR 环境，默认位于 `~/.cache/rimagination-notes/qwen3-asr-venv`（Windows 为 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`）。
 - `scripts/run_qwen_asr.py`：调用 Qwen3-ASR-0.6B，可按 chunk 分段避免显存溢出。
 - `scripts/run_bili_note.py`：一键运行视频/图文提取、评论、归档和证据索引流程。
 - `scripts/extract_bilibili.py`：抓取元数据、字幕、音频、音频转写和评论。

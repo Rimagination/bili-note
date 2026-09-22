@@ -11,7 +11,41 @@ description: Extract Bilibili videos and opus/article posts into readable Markdo
 
 网页 AI 字幕当前只支持 Chrome + `web-access` 路线：让已登录的 B站页面自己请求字幕接口。不要把 Edge、Playwright 临时浏览器或原生 CDP 端口当成等价替代，除非脚本已经明确支持。
 
-Bili Note 与 DyNote 共享可复用本地资源。默认共享目录是 `%USERPROFILE%\.cache\rimagination-notes`，Qwen3-ASR 环境默认是 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`。如果任一 skill 已经安装过 Qwen3-ASR，另一个 skill 必须优先复用，不要重复安装。Hugging Face、Whisper 和 faster-whisper 缓存按本机通用缓存复用。
+Bili Note 与 DyNote 共享可复用本地资源。默认共享目录 Windows 是 `%USERPROFILE%\.cache\rimagination-notes`，macOS / Linux 是 `~/.cache/rimagination-notes`；Qwen3-ASR 环境默认放在其下的 `qwen3-asr-venv`。如果任一 skill 已经安装过 Qwen3-ASR，另一个 skill 必须优先复用，不要重复安装。Hugging Face、Whisper 和 faster-whisper 缓存按本机通用缓存复用。
+
+## 平台支持
+
+脚本是纯 Python 标准库实现，Windows / macOS / Linux 通用（`tests/` 在三个平台都应通过）。需要按平台调整的只有路径写法和命令语法。
+
+先设定 skill 目录和 Python 变量：
+
+**Windows (PowerShell)**
+
+```powershell
+$skill = "$env:USERPROFILE\.codex\skills\bili-note"
+$py = "python"
+```
+
+**macOS / Linux (bash / zsh)**
+
+```bash
+skill="$HOME/.codex/skills/bili-note"   # 按实际安装位置调整
+py="python3"
+```
+
+本文后续命令块以 PowerShell 写法为例。macOS / Linux 按下面规则机械替换即可：
+
+| PowerShell | bash / zsh |
+|---|---|
+| `& $py "$skill\scripts\x.py"` | `"$py" "$skill/scripts/x.py"` |
+| 路径分隔符 `\` | 路径分隔符 `/` |
+| 行尾反引号 `` ` `` 续行 | 行尾 `\` 续行 |
+| `Get-Content -Encoding UTF8 <file>` | `cat <file>` |
+| `curl.exe` | `curl` |
+
+下文示例中的 `<知识库目录>` 指你自己存放笔记的根目录，例如 Windows `D:\knowledge\知识库`、macOS / Linux `~/knowledge/知识库`。
+
+脚本会自动识别平台，venv 里的 `Scripts/python.exe` 与 `bin/python` 都支持，无需手动配置。
 
 ## 字幕密度与视觉理解
 
@@ -61,12 +95,7 @@ $py = "python"
 
 ## 常用命令
 
-在 PowerShell 中先设定 skill 路径：
-
-```powershell
-$skill = "$env:USERPROFILE\.codex\skills\bili-note"
-$py = "python"
-```
+先按上面的「平台支持」设定 `$skill` 和 `$py`。下面以 PowerShell 为例，需要 macOS / Linux 等价写法的小节会在末尾单独给出。
 
 ### 0. 检查依赖和可用路线
 
@@ -80,6 +109,12 @@ $py = "python"
 & $py "$skill\scripts\check_environment.py" --json
 ```
 
+macOS / Linux：
+
+```bash
+"$py" "$skill/scripts/check_environment.py" --json
+```
+
 ### 1. 一键提取和归档
 
 默认先用总入口。它会自动跳过已有输出，适合断点续跑。
@@ -87,7 +122,7 @@ $py = "python"
 ```powershell
 & $py "$skill\scripts\run_bili_note.py" "https://www.bilibili.com/video/BVxxxx/" `
   --work-dir ".\tmp_bili_extract" `
-  --archive-dir "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx_视频短标题" `
+  --archive-dir "<知识库目录>\Rag技术\原始材料\BVxxxx_视频短标题" `
   --comments
 ```
 
@@ -96,7 +131,16 @@ $py = "python"
 ```powershell
 & $py "$skill\scripts\run_bili_note.py" "https://www.bilibili.com/opus/1194341967364882439" `
   --work-dir ".\tmp_bili_opus" `
-  --archive-dir "D:\knowledge\知识库\Rag技术\原始材料\O1194341967364882439_图文短标题" `
+  --archive-dir "<知识库目录>\Rag技术\原始材料\O1194341967364882439_图文短标题" `
+  --comments
+```
+
+macOS / Linux：
+
+```bash
+"$py" "$skill/scripts/run_bili_note.py" "https://www.bilibili.com/video/BVxxxx/" \
+  --work-dir "./tmp_bili_extract" \
+  --archive-dir "$HOME/knowledge/知识库/Rag技术/原始材料/BVxxxx_视频短标题" \
   --comments
 ```
 
@@ -201,7 +245,7 @@ curl.exe -s http://localhost:3456/targets
 把临时提取目录整理成长期材料包。这个步骤默认要做，方便后续根据总结继续提问和回查证据。
 
 ```powershell
-& $py "$skill\scripts\archive_bili_materials.py" --extract-dir ".\tmp_bili_extract" --archive-dir "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx_视频短标题"
+& $py "$skill\scripts\archive_bili_materials.py" --extract-dir ".\tmp_bili_extract" --archive-dir "<知识库目录>\Rag技术\原始材料\BVxxxx_视频短标题"
 ```
 
 长期材料包包含：
@@ -233,7 +277,13 @@ curl.exe -s http://localhost:3456/targets
 写笔记前先看预算。预算是本次笔记的目标，不是写完后才补救的报告：
 
 ```powershell
-Get-Content -Encoding UTF8 "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx_视频短标题\metadata\note_budget.json"
+Get-Content -Encoding UTF8 "<知识库目录>\Rag技术\原始材料\BVxxxx_视频短标题\metadata\note_budget.json"
+```
+
+macOS / Linux：
+
+```bash
+cat "$HOME/knowledge/知识库/Rag技术/原始材料/BVxxxx_视频短标题/metadata/note_budget.json"
 ```
 
 重点先确定：
@@ -249,17 +299,17 @@ Get-Content -Encoding UTF8 "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx
 
 ```powershell
 & $py "$skill\scripts\score_bili_note.py" `
-  --archive-dir "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx_视频短标题" `
-  --note-path "D:\knowledge\知识库\Rag技术\观点X：视频短标题.md" `
-  --out "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx_视频短标题\metadata\note_score.json"
+  --archive-dir "<知识库目录>\Rag技术\原始材料\BVxxxx_视频短标题" `
+  --note-path "<知识库目录>\Rag技术\观点X：视频短标题.md" `
+  --out "<知识库目录>\Rag技术\原始材料\BVxxxx_视频短标题\metadata\note_score.json"
 ```
 
 也可以直接把评分结果写入笔记正文：
 
 ```powershell
 & $py "$skill\scripts\update_note_budget_section.py" `
-  --archive-dir "D:\knowledge\知识库\Rag技术\原始材料\BVxxxx_视频短标题" `
-  --note-path "D:\knowledge\知识库\Rag技术\观点X：视频短标题.md"
+  --archive-dir "<知识库目录>\Rag技术\原始材料\BVxxxx_视频短标题" `
+  --note-path "<知识库目录>\Rag技术\观点X：视频短标题.md"
 ```
 
 重点看：
