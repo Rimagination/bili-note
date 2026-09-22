@@ -25,46 +25,20 @@ Bili Note 是一个面向知识库的 B 站视频与图文笔记工具：完整�
 
 ## 适合什么
 
-- 提炼 B 站技术视频、课程、观点视频、多 P 系列课和图文/动态/opus 长文。
-- 把完整字幕、图文正文、图片、评论、元数据和证据索引长期保存到知识库。
-- 为人类阅读和 Agent 后续问答准备可引用的证据。
-- 根据视频时长、字幕字数、图文正文量、互动热度和评论量控制笔记详略，避免长课、短视频和长图文都被压成同样长度。
-- 先用预算确定目标字数和结构密度，再写主笔记，减少写完后大幅返工。
+- B 站技术视频、课程、观点视频、多 P 系列课和图文/动态/opus 长文。
+- 需要长期保存字幕、正文、图片、评论和证据索引的知识库。
+- 需要人类阅读、Agent 检索和后续问答的学习材料。
 
 ## 输出内容
 
-一次完整提取会生成两层结果：面向阅读的主笔记，以及面向复核和追问的原始材料包。主笔记会先依据材料包里的预算确定详略，再组织学习收获、关键概念、方法流程、实践清单和证据位置；材料包保存完整字幕或图文正文、图片、评论、元数据、JSONL 索引、写前预算和写后评分结果。
+一次完整提取会生成主笔记和原始材料包。主笔记依据材料预算组织学习收获、概念、方法、实践清单和证据位置；材料包保存字幕或图文正文、图片、评论、元数据、索引、预算和评分结果。
 
 <details>
 <summary>展开完整输出清单</summary>
 
-主笔记通常包含：
+主笔记通常包含：知识地图、概念卡、方法流程、关键洞察、实践清单、坑点、自测题和证据脚注。
 
-- 学完你应该获得什么
-- 一句话总论
-- 适用场景与前置知识
-- 知识地图
-- 核心概念卡
-- 方法或流程
-- 关键洞察
-- 实践清单
-- 坑点与反例
-- 自测题
-- 笔记预算与信噪比
-- 证据脚注与原文位置
-- 来源、覆盖与局限
-
-原始材料包通常包含：
-
-- 完整图文 Markdown、纯文本、图片清单和本地图片
-- 图文全文索引和图文证据索引
-- 完整字幕文本、SRT 和原始 JSON
-- 完整评论与评论 JSONL
-- 字幕全集和评论全集
-- 字幕证据索引、图文证据索引、评论证据索引、合并证据索引
-- 关键帧联系图、单帧、关键帧清单和视觉证据索引（用户选择开启时）
-- 内容元数据、字幕清单、图文清单、评论清单
-- 笔记预算和评分结果
+原始材料包通常包含：完整正文和字幕、图片、评论、元数据、JSONL 索引、预算、评分，以及用户开启关键帧后生成的联系图和视觉证据。
 
 </details>
 
@@ -129,49 +103,32 @@ Agent 会运行：
 python scripts/check_environment.py
 ```
 
-Bili Note 和 DyNote 会共享可复用资源。默认共享目录是：
+依赖按能力分层：
 
-```text
-%USERPROFILE%\.cache\rimagination-notes
-```
+| 能力 | 依赖 |
+| --- | --- |
+| 基础提取 | Python 3.10+、B 站网络访问 |
+| 网页 AI 字幕 | 已登录的 Chrome + `web-access`，或远程调试的 Edge |
+| 中文转写 | `ffmpeg`、共享 Qwen3-ASR 环境 |
+| 外语转写 | `ffmpeg`、Whisper / faster-whisper |
+| 下载兜底 | `yt-dlp` |
+| 关键帧理解 | `ffmpeg`、可访问的视频流、视觉模型 |
 
-其中 Qwen3-ASR 虚拟环境默认放在：
-
-```text
-%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv
-```
-
-因此，只要任意一个 skill 已经引导你安装过 Qwen3-ASR，另一个 skill 会优先复用同一套环境和模型缓存。Hugging Face 模型缓存、Whisper 缓存和 faster-whisper 缓存也按本机通用缓存复用，不会绑定到某一个 skill。
-
-依赖按能力分层理解：
-
-| 层级 | 用来做什么 | 需要什么 | 缺失时怎么办 |
-| --- | --- | --- | --- |
-| 必需 | 启动 skill、抓公开元数据、整理已有材料 | Python 3.10+、已安装本 skill、能访问 B 站公开接口 | 先修复 Python、网络或重新安装 skill |
-| 登录浏览器 | 网页 AI 字幕 | Chrome + `web-access`，或开启远程调试的 Edge；浏览器中已登录 B 站并打开视频页 | 没有时跳过网页 AI 字幕，说明覆盖范围 |
-| 中文转写 | 中文字幕不可用时做高可读转写 | `ffmpeg`、共享 Qwen3-ASR 环境 | 运行 `scripts/setup_qwen_asr_env.py`，两个 skill 共用 |
-| 外语转写 | 外语视频转写 | `ffmpeg`、Whisper / faster-whisper | 只有外语视频或 Qwen 不适合时再装 |
-| 下载兜底 | B 站公开音频下载失败时兜底 | `yt-dlp` | 需要时再装，默认流程无需安装 |
-| 关键帧理解 | 视频画面取样和联系图 | `ffmpeg`、可访问的视频流或 `yt-dlp`、视觉模型 | 关闭关键帧理解，或补装 ffmpeg/yt-dlp |
-| 开发测试 | 跑本项目测试 | `pytest` | 普通使用不需要 |
+Bili Note 与 DyNote 会复用 `%USERPROFILE%\.cache\rimagination-notes` 下的模型和 Qwen3-ASR 环境。普通使用无需安装全部增强依赖，环境缺失时会跳过对应路线并说明覆盖范围。
 
 默认策略：B 站公开视频优先走公开字幕和网页 AI 字幕；确实需要音频转写时，中文或未指定语言的视频优先 Qwen3-ASR，明确是外语视频时优先 Whisper 系后端。需要手动指定时，可以用 `--asr-backend qwen3-asr` 或 `--asr-backend faster-whisper`。
 
 ## 字幕很少怎么办
 
-Bili Note 默认优先用字幕，但长视频的字幕/转写如果明显很少，通常意味着内容可能主要在画面里：PPT、板书、代码演示、屏幕操作、产品界面或无解说片段。
+Bili Note 默认优先用字幕。长视频字幕/转写明显稀疏时，画面可能包含 PPT、板书、代码、软件操作或无解说片段，预算文件会记录画面依赖提示。
 
-这时 Bili Note 会在 `metadata/note_budget.json` 里写入画面依赖提示。更合适的做法是先抽取关键帧或截图，再用 OCR 或多模态视觉理解补证。如果当前接入的模型不能看图，Agent 应该明确告诉你：这个高级功能需要视觉模型或人工查看关键帧；当前只能基于字幕、元数据和评论做有限整理。
+每次视频运行先做轻量预检，再强制询问是否开启关键帧理解。开启后最多抽取 12 帧，先生成 4×3 联系图，再按需查看单帧；关闭后继续使用字幕、转写、评论和元数据路线。当前模型不能看图时，Agent 会说明覆盖范围。
 
-每次视频运行会先做轻量预检：读取时长、分P和已有字幕，计算字幕密度并给出是否值得看画面的建议；这个阶段不会下载视频。随后仍会强制询问是否开启关键帧理解。预检结果保存在 `visual_preflight.json`，方便复核本次选择依据。
-
-开启关键帧理解后，`scripts/extract_video_keyframes.py` 会在工作目录生成 `keyframes/contact_sheet.png`、最多 12 张单帧和 `keyframes_manifest.json`；归档后清单位于 `metadata/keyframes_manifest.json`。视觉观察写入归档目录的 `metadata/visual_review.md`，并使用 `KF-Pxx-xx` 关键帧证据编号。
+预检结果保存在 `visual_preflight.json`。开启关键帧后，工作目录会生成联系图、单帧和 `keyframes_manifest.json`；归档后对应文件位于 `metadata/`，视觉观察写入 `metadata/visual_review.md`。
 
 ## 登录和隐私
 
-网页 AI 字幕支持两条路线：Chrome 通过 `web-access`，Edge 通过 Chromium DevTools Protocol 直连。两条路线都让已登录的 B 站页面自己请求字幕接口；Bili Note 不读取、不导出、不保存 Cookie、localStorage、浏览器 profile 或登录 token。
-
-如果没有可用的浏览器登录态，Bili Note 会跳过网页 AI 字幕，改用公开字幕、图文正文、评论、音频转写或有限材料整理，并明确说明覆盖范围。
+网页 AI 字幕支持 Chrome `web-access` 和 Edge Chromium DevTools Protocol。两条路线都让已登录的 B 站页面自己请求字幕接口；Bili Note 不读取、不导出、不保存 Cookie、localStorage、浏览器 profile 或登录 token。没有浏览器登录态时，会改用公开字幕、正文、评论或音频转写，并说明覆盖范围。
 
 Edge 需要用远程调试端口启动一个独立实例，并在该实例中登录 B 站。Windows PowerShell 示例：
 
@@ -181,33 +138,24 @@ $profile = Join-Path $env:LOCALAPPDATA "bili-note-edge-profile"
 & $edge --remote-debugging-port=9222 --user-data-dir="$profile" "https://www.bilibili.com/"
 ```
 
-首次使用时在这个 Edge 实例中完成登录，然后运行总入口并指定 `--browser edge`。脚本默认连接 `http://127.0.0.1:9222`，也可以通过 `--edge-cdp-url` 修改。Edge 路线需要可选 Python 包 `websocket-client`：`python -m pip install websocket-client`。
+首次使用时在这个 Edge 实例中登录 B 站，再运行总入口并指定 `--browser edge`。默认端口为 `9222`，可用 `--edge-cdp-url` 修改；另需安装 `websocket-client`：`python -m pip install websocket-client`。
 
 ## 写笔记的原则
 
-- 先讲“为什么”和“怎么迁移使用”，再讲“原内容说了什么”。
-- 课程型视频按学习模块组织，不按分 P 机械流水账压缩。
-- 观点型视频按问题背景、作者判断、论据、适用边界和启发来整理。
-- 技术教程和图文长文保留架构、数据流、代码思路、配置项、图片结论、评估方式和排错路径。
-- 评论区只保留纠错、补充案例、实践经验、替代方案和争议点。
-- 写笔记前必须先读取 `metadata/note_budget.json`，把推荐字数区间、写作粒度、质量倍率和画面依赖提示当作写作目标；写完后再用评分做验收。
-- 关键判断默认使用论文式编号，例如 `[1][2]`。图文、字幕和评论证据共用同一套编号；文末脚注会链接到完整字幕、图文证据或评论归档，正文不直接堆长证据编号。
+- 先讲学习目标、方法和迁移方式，再补充原内容。
+- 课程按学习模块组织，观点按背景、判断、论据和适用边界组织。
+- 技术教程保留架构、配置、操作步骤、评估方式和排错路径。
+- 评论区只保留纠错、案例、实践经验、替代方案和争议点。
+- 写作前读取 `metadata/note_budget.json`，写作后用评分结果验收；关键判断使用 `[1][2]` 等编号链接到证据。
 
 ## 相关文件
 
-- `SKILL.md`：Codex 使用这个 skill 时读取的完整工作流说明。
-- `scripts/check_environment.py`：检查核心工作流、B 站公开接口、网页 AI 字幕、音频转写和测试依赖是否可用。
-- `scripts/setup_qwen_asr_env.py`：创建或复用共享 Qwen3-ASR 环境，默认位于 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`。
-- `scripts/run_qwen_asr.py`：调用 Qwen3-ASR-0.6B，可按 chunk 分段避免显存溢出。
-- `scripts/run_bili_note.py`：一键运行视频/图文提取、评论、归档和证据索引流程。
-- `scripts/extract_video_keyframes.py`：下载低清视频流并生成最多 12 张代表帧与联系图。
-- `scripts/extract_bilibili.py`：抓取元数据、字幕、音频、音频转写和评论。
-- `scripts/extract_bilibili_opus.py`：抓取 B 站图文/动态正文、图片、代码块和图文评论。
-- `scripts/fetch_browser_ai_subtitles.py`：通过已登录网页播放器下载 B 站 AI 字幕。
-- `scripts/edge_cdp.py`：连接 Edge 远程调试页面的可选 CDP 适配器。
-- `scripts/archive_bili_materials.py`：归档完整材料，生成全文索引、证据索引和带字幕密度/视觉依赖提示的笔记预算。
-- `scripts/score_bili_note.py`：按预算验收主笔记长度、压缩比、证据引用和视觉依赖提示。
-- `scripts/update_note_budget_section.py`：把预算、互动质量和信噪比评分写回主笔记。
+- `SKILL.md`：完整工作流说明。
+- `scripts/run_bili_note.py`：一键运行视频/图文提取、评论、归档和证据索引。
+- `scripts/check_environment.py`：检查可用的字幕、浏览器、转写和测试路线。
+- `scripts/extract_video_keyframes.py`：生成最多 12 张代表帧和联系图。
+- `scripts/fetch_browser_ai_subtitles.py`、`scripts/edge_cdp.py`：获取网页 AI 字幕。
+- `scripts/archive_bili_materials.py`、`scripts/score_bili_note.py`：归档材料并验收笔记。
 
 ## 社区友链
 
